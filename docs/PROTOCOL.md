@@ -21,15 +21,20 @@ Current vocabulary:
 - `text`
 - `file`
 - `clipboard`
-- `screen.view`
-- `screen.audio`
-- `screen.control`
+- `screen.share` — the device can capture and encode a local screen/window
+- `screen.view` — the device can decode and display a remote screen stream
+- `screen.audio` — system-audio capture and/or playback is available as declared in screen metadata
+- `screen.control` — the device can act as a remote-control target
 - `audio`
 - `sensor`
 
 Capability names are lowercase dot-separated tokens, limited to 64 bytes each and 32 entries per peer. Duplicates and malformed values are rejected during the authenticated handshake.
 
-If `screen` metadata is advertised, the peer must also advertise `screen.view`. Screen metadata declares codecs, maximum dimensions and FPS, plus whether control or system audio are supported. `screen.control` and `screen.audio` must be present when those booleans are true. Current v0.1 builds advertise only `text`, `file`, and `clipboard`; screen capability advertisement begins when a real capture backend is available.
+Screen metadata is directional. `encode` describes codecs and limits available when this device shares a screen; `decode` describes codecs and limits available when this device views one. `screen.share` requires valid encode metadata and `screen.view` requires valid decode metadata. This matters on mobile and older GPUs, where encode and decode codec support can differ.
+
+`control_target` requires `screen.control` and an encode/share role. `system_audio_capture` requires `screen.audio` plus an encode role; `system_audio_playback` requires `screen.audio` plus a decode role. Duplicate codecs, zero dimensions/FPS, dimensions above 16384, FPS above 240, or inconsistent role/capability combinations are rejected.
+
+Current v0.1 builds advertise only `text`, `file`, and `clipboard`; screen capability advertisement begins only when a real capture or decode backend is available.
 
 The local state snapshot exposes both `capabilities` and `capabilities_authenticated`. Connected peers always use the TLS-authenticated Hello values, preventing a forged discovery beacon from overriding a live session.
 
@@ -58,7 +63,7 @@ Future LoCAL services are identified with strict local resource URIs:
 ```text
 lm://<64-hex-device-id>/files
 lm://<64-hex-device-id>/clipboard
-lm://<64-hex-device-id>/screen/main
+lm://<64-hex-device-id>/screen/display/display-0
 lm://<64-hex-device-id>/audio/output
 lm://<64-hex-device-id>/sensors/gyro
 ```
@@ -70,8 +75,9 @@ lm://<64-hex-device-id>/sensors/gyro
 The core contains serializable screen protocol primitives for future negotiated sessions:
 
 - codec enum: H.264, VP9 and AV1
-- screen capability limits: codecs, maximum dimensions / FPS, control and system-audio support
-- `ScreenOffer`: source, selected codec, dimensions, FPS and requested optional features
+- directional screen media limits: encode/decode codecs, maximum dimensions and FPS
+- endpoint features: control target, system-audio capture and system-audio playback
+- `ScreenOffer`: UUID session ID, LocalMesh screen resource path, selected codec, dimensions, FPS and requested optional features
 - `ScreenFrameHeader`: sequence, monotonic timestamp, keyframe flag and encoded payload length
 
 Large encoded video frames are **not** carried inside the 96KiB CBOR control-frame limit. Screen video will use a dedicated QUIC stream after explicit offer / accept negotiation. See [`SCREEN_SHARING.md`](SCREEN_SHARING.md) for capture backends, permission separation, transport policy and implementation phases.
