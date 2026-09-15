@@ -26,7 +26,44 @@ Sender hashes and offers a file. Receiver accepts explicitly within 120 seconds,
 
 Resumption uses contiguous offsets, not a chunk bitmap. Partial files survive restarts; retries require new consent. A hash mismatch truncates the partial to zero for a clean retry. Simultaneous writers to a partial are rejected. Limits: 8 active transfers, 100 visible transfers. Complete and partial bytes persist; the transfer list is session-local.
 
+## Local resource model
+
+Future LoCAL services are identified with strict local resource URIs:
+
+```text
+lm://<64-hex-device-id>/files
+lm://<64-hex-device-id>/clipboard
+lm://<64-hex-device-id>/screen/main
+lm://<64-hex-device-id>/audio/output
+lm://<64-hex-device-id>/sensors/gyro
+```
+
+`lm://` is an application-level identifier only. It does not replace TLS identity, pairing, capability checks or per-feature permission. Query strings, fragments, empty path segments and `.` / `..` traversal are rejected by the core parser.
+
+The first capability vocabulary is:
+
+- `text`
+- `file`
+- `clipboard`
+- `screen.view`
+- `screen.audio`
+- `screen.control`
+- `audio`
+- `sensor`
+
+Capability advertisement is intentionally being introduced as an extension rather than changing the current v1 Hello immediately. This keeps existing v0.1 peers wire-compatible while the negotiation flow is implemented and tested.
+
+## Screen-sharing extension foundation
+
+The core contains serializable screen protocol primitives for future negotiated sessions:
+
+- codec enum: H.264, VP9 and AV1
+- screen capability limits: codecs, maximum dimensions / FPS, control and system-audio support
+- `ScreenOffer`: source, selected codec, dimensions, FPS and requested optional features
+- `ScreenFrameHeader`: sequence, monotonic timestamp, keyframe flag and encoded payload length
+
+Large encoded video frames are **not** carried inside the 96KiB CBOR control-frame limit. Screen video will use a dedicated QUIC stream after explicit offer / accept negotiation. See [`SCREEN_SHARING.md`](SCREEN_SHARING.md) for capture backends, permission separation, transport policy and implementation phases.
+
 ## Storage and future work
 
-`identity.json` has mode 0600 on Unix, its data directory 0700. A process lock prevents simultaneous use. SQLite WAL stores trusted IDs, name and messages; UI shows latest 200 messages. File content is separate. Future channels include Opus, sensors, clipboard images and custom channels; v1 does not silently accept them.
-
+`identity.json` has mode 0600 on Unix, its data directory 0700. A process lock prevents simultaneous use. SQLite WAL stores trusted IDs, name and messages; UI shows latest 200 messages. File content is separate. Future channels include screen sharing, Opus, sensors, clipboard images and custom channels; v1 does not silently accept them.
