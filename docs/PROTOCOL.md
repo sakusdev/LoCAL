@@ -4,11 +4,34 @@ The Text + File MVP shares a Rust core between the CLI, Tauri desktop shell and 
 
 ## Discovery and identity
 
-JSON UDP beacons on port 53318 every 3 seconds use IPv4 broadcast and supplementary multicast `239.255.53.18`. Fields: `magic=LOCAL_DISCOVERY`, version, device ID, name and listening port. Source IP comes from the socket. Peers expire after 20 seconds; trusted entries remain. Metadata is untrusted until TLS identity is checked. Manual IPv4:port works without discovery. DNS-SD/mDNS, IPv6, QR, Internet rendezvous and relays are not implemented.
+JSON UDP beacons on port 53318 every 3 seconds use IPv4 broadcast and supplementary multicast `239.255.53.18`. Fields: `magic=LOCAL_DISCOVERY`, version, device ID, name, listening port and an optional capability hint list. Source IP comes from the socket. Peers expire after 20 seconds; trusted entries remain. Discovery metadata, including capabilities, is **untrusted** until TLS identity is checked. Manual IPv4:port works without discovery. DNS-SD/mDNS, IPv6, QR, Internet rendezvous and relays are not implemented.
 
 Each device persists an Ed25519 private key and self-signed certificate. Identity is the full BLAKE3 hash of the public key. Quinn/rustls uses QUIC + TLS 1.3, ALPN `localmesh/1`, required client certificates. Certificate format and handshake signatures are verified; public CA chains and DNS names do not define trust. The certificate key must match the expected/discovered ID.
 
-The first bidirectional stream exchanges `{version,id,name,port}`. A six-digit code is derived from 32 bytes of TLS exporter material with label `LoCAL pairing v1` and empty context. Users compare codes on both devices. Each side exchanges `Confirm`; BOTH local and remote confirmation are required before data requests or persisted trust. Known peers confirm existing stored trust automatically. Pairing expires after 120 seconds. Forgetting a peer requires confirmation again on reconnect.
+The first bidirectional stream exchanges `{version,id,name,port,capabilities,screen?}`. `capabilities` and `screen` are additive serde fields: older v1 implementations omit them, while older decoders ignore the additional fields. A missing capability list from a v1 peer is interpreted as the original MVP set: `text`, `file`, `clipboard`.
+
+A six-digit code is derived from 32 bytes of TLS exporter material with label `LoCAL pairing v1` and empty context. Users compare codes on both devices. Each side exchanges `Confirm`; BOTH local and remote confirmation are required before data requests or persisted trust. Known peers confirm existing stored trust automatically. Pairing expires after 120 seconds. Forgetting a peer requires confirmation again on reconnect.
+
+## Capability negotiation
+
+Authenticated Hello metadata is the source of truth for peer capabilities. LAN discovery can show capability hints before connecting, but the UI marks them as unauthenticated and they must never authorize a feature.
+
+Current vocabulary:
+
+- `text`
+- `file`
+- `clipboard`
+- `screen.view`
+- `screen.audio`
+- `screen.control`
+- `audio`
+- `sensor`
+
+Capability names are lowercase dot-separated tokens, limited to 64 bytes each and 32 entries per peer. Duplicates and malformed values are rejected during the authenticated handshake.
+
+If `screen` metadata is advertised, the peer must also advertise `screen.view`. Screen metadata declares codecs, maximum dimensions and FPS, plus whether control or system audio are supported. `screen.control` and `screen.audio` must be present when those booleans are true. Current v0.1 builds advertise only `text`, `file`, and `clipboard`; screen capability advertisement begins when a real capture backend is available.
+
+The local state snapshot exposes both `capabilities` and `capabilities_authenticated`. Connected peers always use the TLS-authenticated Hello values, preventing a forged discovery beacon from overriding a live session.
 
 ## Framing
 
@@ -19,6 +42,8 @@ Operations open separate QUIC bidirectional streams. CBOR frames use a four-byte
 - `file`: UUID `id`, safe basename `name`, `size` (0–20GiB), BLAKE3 `hash` (64 lowercase hexadecimal characters)
 
 Replies contain `ok`, `error`, `offset`. Text is saved before acknowledgement with a composite message ID / peer ID / direction key. Timestamps are local. UI polls local state independently of network framing.
+
+Message and file handlers verify that the authenticated peer advertised the relevant capability before accepting data. Legacy v1 peers remain compatible through the original-MVP fallback described above.
 
 ## Files
 
@@ -39,19 +64,6 @@ lm://<64-hex-device-id>/sensors/gyro
 ```
 
 `lm://` is an application-level identifier only. It does not replace TLS identity, pairing, capability checks or per-feature permission. Query strings, fragments, empty path segments and `.` / `..` traversal are rejected by the core parser.
-
-The first capability vocabulary is:
-
-- `text`
-- `file`
-- `clipboard`
-- `screen.view`
-- `screen.audio`
-- `screen.control`
-- `audio`
-- `sensor`
-
-Capability advertisement is intentionally being introduced as an extension rather than changing the current v1 Hello immediately. This keeps existing v0.1 peers wire-compatible while the negotiation flow is implemented and tested.
 
 ## Screen-sharing extension foundation
 
