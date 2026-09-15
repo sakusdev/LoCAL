@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/local-core", "crates/local-cli", "crates/local-android", "apps/desktop/src-tauri"]
-default-members = ["crates/local-core", "crates/local-cli"]
+members = ["crates/local-core", "crates/local-cli", "crates/local-android", "crates/local-screen", "apps/desktop/src-tauri"]
+default-members = ["crates/local-core", "crates/local-cli", "crates/local-screen"]
 resolver = "2"
 
 [workspace.package]
@@ -15,6 +15,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "fs", "signal"] }
 local-core = { path = "crates/local-core" }
+local-screen = { path = "crates/local-screen" }
 
 [profile.release]
 lto = "thin"
