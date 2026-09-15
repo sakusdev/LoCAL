@@ -1,40 +1,63 @@
 use crate::{Node, Peer};
 use serde::{Deserialize, Serialize};
 use socket2::{Domain, Protocol, Socket, Type};
-use std::{net::{Ipv4Addr, SocketAddr}, sync::{atomic::Ordering, Arc}, time::Duration};
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
 
 const PORT: u16 = 53318;
 const GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 53, 18);
 
 #[derive(Serialize, Deserialize)]
-struct Beacon { magic: String, version: u8, id: String, name: String, port: u16 }
+struct Beacon {
+    magic: String,
+    version: u8,
+    id: String,
+    name: String,
+    port: u16,
+}
 
 pub fn addresses(port: u16) -> Vec<String> {
-    if_addrs::get_if_addrs().unwrap_or_default().into_iter().filter_map(|i| match i.addr {
-        if_addrs::IfAddr::V4(a) if !a.ip.is_loopback() => Some(SocketAddr::from((a.ip,port)).to_string()), _=>None
-    }).collect()
+    if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|i| match i.addr {
+            if_addrs::IfAddr::V4(a) if !a.ip.is_loopback() => {
+                Some(SocketAddr::from((a.ip, port)).to_string())
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 pub fn start(node: Arc<Node>) {
     tokio::spawn(async move {
         let result = run(node.clone()).await;
-        if let Err(e) = result { node.warn(format!("Automatic discovery unavailable: {e}. Connect by IP address.")); }
+        if let Err(e) = result {
+            node.warn(format!(
+                "Automatic discovery unavailable: {e}. Connect by IP address."
+            ));
+        }
     });
 }
 
 async fn run(node: Arc<Node>) -> anyhow::Result<()> {
-    let socket = Socket::new(Domain::IPV4,Type::DGRAM,Some(Protocol::UDP))?;
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
     socket.set_reuse_address(true)?;
     socket.set_broadcast(true)?;
-    socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED,PORT)).into())?;
+    socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, PORT)).into())?;
     // Broadcast is primary; multicast is a supplementary path on Wi-Fi.
-    let _ = socket.join_multicast_v4(&GROUP,&Ipv4Addr::UNSPECIFIED);
+    let _ = socket.join_multicast_v4(&GROUP, &Ipv4Addr::UNSPECIFIED);
     socket.set_nonblocking(true)?;
     let socket = tokio::net::UdpSocket::from_std(socket.into())?;
     let mut tick = tokio::time::interval(Duration::from_secs(3));
-    let mut buffer = [0u8;2048];
+    let mut buffer = [0u8; 2048];
     loop {
-        if node.stopping.load(Ordering::SeqCst) { break; }
+        if node.stopping.load(Ordering::SeqCst) {
+            break;
+        }
         tokio::select! {
             _ = node.shutdown.notified() => break,
             _ = tick.tick() => {

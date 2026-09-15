@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#090d12">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost">
+  <title>LoCAL</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><img src="mark.svg" width="38" height="38" alt=""><div>LoCAL<small>YOUR PERSONAL MESH</small></div><span class="version">0.1</span></div>
+    <div class="nav-label">WORKSPACE</div>
+    <nav aria-label="メインナビゲーション">
+      <button data-tab="nearby" class="nav-item active"><span class="nav-icon">◎</span><span>近くの端末</span><span id="peer-count" class="count">0</span></button>
+      <button data-tab="transfers" class="nav-item"><span class="nav-icon">⇄</span><span>ファイル転送</span><span id="transfer-count" class="count">0</span></button>
+      <button data-tab="history" class="nav-item"><span class="nav-icon">◷</span><span>メッセージ</span></button>
+      <button data-tab="settings" class="nav-item"><span class="nav-icon">⚙</span><span>設定</span></button>
+    </nav>
+    <div class="sidebar-bottom"><div class="privacy"><span class="status-dot"></span> あなたのLANの中だけで</div><p>アカウント不要。クラウド不要。<br>データは、あなたの端末に。</p><div class="device-self"><div class="avatar">L</div><div><b id="self-name">接続を準備中…</b><small id="self-address">LoCAL Core</small></div></div></div>
+  </aside>
+  <main>
+    <header class="topbar"><div><span class="breadcrumb">WORKSPACE</span><span class="slash">/</span><span id="page-name">近くの端末</span></div><span class="connection-pill" id="connection"><i class="status-dot"></i><span>準備中</span></span></header>
+    <div id="native-error" class="notice" hidden></div>
+    <div id="warnings" hidden></div>
+    <section id="view-nearby" class="view">
+      <div class="page-heading"><div class="eyebrow">A LITTLE CLOSER.</div><h1>近くにいる。<br class="mobile-break">すぐ、つながる。</h1><p>同じWi-Fiの端末へ、ファイルも言葉も。</p></div>
+      <div class="discovery-banner"><div class="radar" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><img src="mark.svg" width="44" height="44" alt=""><span class="radar-dot dot-one"></span><span class="radar-dot dot-two"></span></div><div><div class="overline">LOCAL DISCOVERY</div><h2>あなたのネットワークを見つけよう。</h2><p>もう一方の端末でもLoCALを開いてください。<br>見つからないときは、IPアドレスで接続できます。</p><button class="text-button" id="manual-open">IPアドレスで接続 <span>↗</span></button></div><span class="banner-number" aria-hidden="true">01—</span></div>
+      <div class="section-title"><h2>近くの端末 <span id="nearby-count">0</span></h2><span class="muted small"><span class="scan-dot"></span> 自動で検索中</span></div>
+      <div id="peers" class="peer-grid"></div>
+      <div class="footnote"><span>◇</span> 初回だけ、両方の端末で6桁のコードを確認します。</div>
+    </section>
+    <section id="view-transfers" class="view" hidden>
+      <div class="page-heading"><div class="eyebrow">DIRECT TO YOUR DEVICE.</div><h1>ファイル転送</h1><p>受信を確認してから保存。送信中の状態も、ここで。</p></div>
+      <div id="transfers"></div>
+      <p class="muted small">中断したファイルは、同じ相手に同じファイルを選び直すと続きから転送します。</p>
+    </section>
+    <section id="view-history" class="view" hidden>
+      <div class="page-heading"><div class="eyebrow">WORDS, WITHOUT THE CLOUD.</div><h1>メッセージ</h1><p>端末同士のちいさな会話。履歴はこの端末に保存します。</p></div>
+      <label class="select-label" for="chat-peer">送信する端末</label><select id="chat-peer"></select>
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <form id="message-form" class="composer"><label class="sr-only" for="message">メッセージ</label><textarea id="message" placeholder="メッセージを入力…" maxlength="16384" rows="3"></textarea><div class="composer-actions"><button type="button" id="paste-clipboard" class="secondary">クリップボードを貼り付け</button><button type="submit" id="send-message" class="primary">送信 ↗</button></div></form>
+    </section>
+    <section id="view-settings" class="view" hidden>
+      <div class="page-heading"><div class="eyebrow">MAKE YOURSELF AT HOME.</div><h1>設定</h1><p>この端末と、あなたが信頼したつながり。</p></div>
+      <div class="settings-card"><h2>この端末</h2><form id="name-form"><label for="device-name">端末の名前</label><div class="input-row"><input id="device-name" maxlength="80" placeholder="端末の名前"><button class="primary" type="submit">保存</button></div></form><label>接続用アドレス</label><div id="addresses" class="mono info-value">—</div><label>Device ID / 公開鍵の指紋</label><div id="fingerprint" class="mono fingerprint">—</div><p class="muted small">表示名が同じでも鍵が変わった端末は、もう一度ペアリングが必要です。</p></div>
+      <div class="settings-card"><h2>信頼済みの端末</h2><div id="trusted"></div></div>
+      <div class="settings-card"><h2>保存とプライバシー</h2><label>受信ファイルの保存先</label><div id="receive-dir" class="mono fingerprint"></div><p id="storage-note" class="muted small"></p><div class="settings-row"><span>メッセージ履歴</span><button id="clear-history" class="danger-button">履歴を削除</button></div></div>
+      <p class="muted small">LoCAL v<span id="version">0.1.0</span> · QUIC / TLS 1.3 · BLAKE3<br>音声・センサー・QRペアリングは今後のバージョンで対応予定です。</p>
+    </section>
+  </main>
+  <dialog id="manual-dialog"><form id="manual-form"><div class="dialog-heading"><h2>アドレスで接続</h2><button type="button" data-close="manual-dialog" class="icon-button" aria-label="閉じる">×</button></div><p>相手のLoCALの「設定」に表示されたアドレスを入力してください。</p><label for="manual-address">IPアドレス : ポート</label><input id="manual-address" placeholder="192.168.1.20:53319" inputmode="url" required><p class="muted small">両方の端末を同じWi-Fiに接続してください。</p><button type="submit" class="primary full">接続する ↗</button></form></dialog>
+  <dialog id="confirm-dialog"><div class="dialog-heading"><h2 id="confirm-title">確認</h2><button type="button" data-close="confirm-dialog" class="icon-button" aria-label="閉じる">×</button></div><p id="confirm-text"></p><button id="confirm-action" class="primary full">実行</button></dialog>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
+
