@@ -8,6 +8,7 @@ A device resource uses the LocalMesh URI form:
 
 ```text
 lm://<64-hex-device-id>/screen/main
+lm://<64-hex-device-id>/screen/display/<stable-local-id>
 lm://<64-hex-device-id>/screen/window/<stable-local-id>
 lm://<64-hex-device-id>/audio/output
 lm://<64-hex-device-id>/sensors/gyro
@@ -23,12 +24,36 @@ The protocol core defines independent capabilities:
 
 A peer may expose `screen.view` without either of the other capabilities. UI must never infer control permission from view permission.
 
+## Implementation boundary
+
+Screen sharing is deliberately split into two layers:
+
+```text
+OS capture API
+   ↓
+platform capture + hardware encoder
+   ↓
+local-screen
+   ├─ source metadata
+   ├─ capability/profile negotiation
+   ├─ encoded-frame safety validation
+   └─ backend/session interfaces
+   ↓
+local-core / QUIC transport
+```
+
+`local-core` never needs to understand Windows GPU textures, PipeWire buffers, ScreenCaptureKit surfaces or Android MediaProjection objects. `local-screen` also does **not** require every backend to copy full RGBA frames through Rust-owned memory. A platform backend should capture and hardware-encode natively where possible, then expose encoded access units.
+
+This boundary exists specifically to keep a future zero-copy or near-zero-copy path possible on Windows and Android. Current `local-screen` negotiation prefers H.264, clamps resolution/FPS to limits supported by both peers, and caps one encoded access unit at 16 MiB before it enters the transport path.
+
 ## Session phases
 
 ```text
 paired QUIC session
       │
-      ├─ capability negotiation
+      ├─ authenticated capability negotiation
+      │
+      ├─ enumerate local capture sources
       │
       ├─ screen offer
       │    source / codec / size / fps
@@ -43,7 +68,7 @@ paired QUIC session
       └─ optional control stream
 ```
 
-The existing v1 Text/File request framing remains unchanged. Screen sharing is added as a negotiated extension so old peers continue to interoperate for v1 features.
+The existing v1 Text/File request framing remains unchanged. Screen sharing is added as a negotiated extension so old peers continue to interoperate for v1 features. Discovery capability fields are only hints; the TLS-authenticated Hello is authoritative.
 
 ## Video transport
 
@@ -55,7 +80,7 @@ The initial codec preference is:
 
 A `ScreenOffer` declares the selected source, codec, width, height and target FPS. Video payloads must not be packed into the existing 96 KiB CBOR control frames. Instead, screen video uses a dedicated QUIC stream. Each encoded access unit is preceded by a compact `ScreenFrameHeader` containing sequence number, monotonic timestamp, keyframe flag and payload length.
 
-The receiver enforces negotiated maximum resolution, frame rate and encoded-frame limits before allocation. Decoders must reject unreasonable dimensions and integer-overflowing lengths.
+The receiver enforces negotiated maximum resolution, frame rate and encoded-frame limits before allocation. Decoders must reject unreasonable dimensions, backwards frame sequence/timestamps and integer-overflowing lengths.
 
 ### Stream reliability policy
 
@@ -65,7 +90,7 @@ A later low-latency mode may use QUIC DATAGRAM for independently decodable chunk
 
 ## Capture backends
 
-Platform capture belongs outside `local-core`.
+Platform capture belongs outside `local-core`. Each backend implements the `local-screen` encoded-capture boundary and reports real capabilities only when its capture/encoder path is available.
 
 ### Windows
 
@@ -73,11 +98,11 @@ Preferred path: Windows Graphics Capture with hardware H.264 through Media Found
 
 ### macOS
 
-Preferred path: ScreenCaptureKit. Screen-recording permission must be requested by the app and failure must remain visible to the user.
+Preferred path: ScreenCaptureKit, with a native hardware encoder such as VideoToolbox. Screen-recording permission must be requested by the app and failure must remain visible to the user.
 
 ### Linux
 
-Preferred path on Wayland: xdg-desktop-portal + PipeWire. On X11, use an explicit X11 capture backend. LoCAL should not silently bypass the desktop portal on Wayland.
+Preferred path on Wayland: xdg-desktop-portal + PipeWire. On X11, use an explicit X11 capture backend. LoCAL should not silently bypass the desktop portal on Wayland. Encoder choice can follow the hardware available to the system, with a development software fallback where necessary.
 
 ### Android
 
@@ -117,12 +142,21 @@ System audio is a separate `screen.audio` capability. It should use Opus at 48 k
 
 ## Implementation sequence
 
-### Phase S0 — protocol foundation
+### Phase S0 — protocol foundation ✅
 
 - capability names in `local-core`
 - strict `lm://` resource parser
 - codec / screen capability / offer / frame-header wire types
+- authenticated capability negotiation with v1 fallback
 - protocol and security documentation
+
+### Phase S0.5 — capture boundary
+
+- `local-screen` workspace crate
+- source metadata and safe LocalMesh resource paths
+- H.264 → VP9 → AV1 profile negotiation
+- encoded access-unit size/order validation
+- platform backend/session interfaces that keep raw GPU surfaces outside `local-core`
 
 ### Phase S1 — desktop view-only prototype
 
