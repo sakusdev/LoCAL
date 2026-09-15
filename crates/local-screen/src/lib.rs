@@ -246,7 +246,10 @@ mod tests {
         };
         let profile = negotiate(&source, &viewer, &request).unwrap();
         assert_eq!(profile.codec, ScreenCodec::H264);
-        assert_eq!((profile.width, profile.height, profile.fps), (1920, 1080, 60));
+        assert_eq!(
+            (profile.width, profile.height, profile.fps),
+            (1920, 1080, 60)
+        );
         assert!(!profile.system_audio);
         assert!(profile.control);
     }
