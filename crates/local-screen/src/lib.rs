@@ -10,6 +10,9 @@ use local_core::protocol::{
 };
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_os = "windows")]
+pub mod windows;
+
 pub const MAX_ENCODED_FRAME: usize = 16 * 1024 * 1024;
 pub const CODEC_PREFERENCE: &[ScreenCodec] =
     &[ScreenCodec::H264, ScreenCodec::Vp9, ScreenCodec::Av1];
@@ -106,11 +109,17 @@ fn sane(capabilities: &ScreenMediaCapabilities) -> bool {
         && capabilities.max_fps <= 240
 }
 
+fn even_dimension(value: u32) -> u32 {
+    value & !1
+}
+
 /// Chooses a profile supported by the source encoder and viewer decoder.
 ///
 /// H.264 wins when available because the initial LoCAL target is broad hardware
 /// interoperability. Optional audio/control requests gracefully negotiate down
-/// to `false` rather than making view-only sharing fail.
+/// to `false` rather than making view-only sharing fail. Dimensions are rounded
+/// down to even values because the initial H.264/YUV420 path requires even
+/// chroma geometry.
 pub fn negotiate(
     source: &ScreenCapabilities,
     viewer: &ScreenCapabilities,
@@ -137,16 +146,25 @@ pub fn negotiate(
         .copied()
         .find(|codec| encode.codecs.contains(codec) && decode.codecs.contains(codec))
         .ok_or_else(|| anyhow::anyhow!("No common screen codec"))?;
-    Ok(NegotiatedScreen {
-        codec,
-        width: request
+    let width = even_dimension(
+        request
             .max_width
             .min(encode.max_width)
             .min(decode.max_width),
-        height: request
+    );
+    let height = even_dimension(
+        request
             .max_height
             .min(encode.max_height)
             .min(decode.max_height),
+    );
+    if width == 0 || height == 0 {
+        bail!("Negotiated screen size is too small");
+    }
+    Ok(NegotiatedScreen {
+        codec,
+        width,
+        height,
         fps: request.max_fps.min(encode.max_fps).min(decode.max_fps),
         system_audio: request.system_audio
             && source.system_audio_capture
@@ -227,6 +245,10 @@ pub trait EncodedCaptureSession: Send {
     fn profile(&self) -> &NegotiatedScreen;
     /// Returns the next encoded access unit, or `None` when capture ended.
     fn next_frame(&mut self) -> Result<Option<EncodedVideoFrame>>;
+    /// Requests an intra frame so a receiver can recover after loss or startup.
+    fn request_keyframe(&self) -> Result<()> {
+        bail!("Capture backend does not support keyframe requests")
+    }
     fn stop(&mut self) -> Result<()>;
 }
 
@@ -285,6 +307,23 @@ mod tests {
         );
         assert!(!profile.system_audio);
         assert!(profile.control);
+    }
+
+    #[test]
+    fn negotiation_rounds_dimensions_for_yuv420() {
+        let profile = negotiate(
+            &source(vec![ScreenCodec::H264]),
+            &viewer(vec![ScreenCodec::H264]),
+            &ScreenRequest {
+                max_width: 1919,
+                max_height: 1079,
+                max_fps: 30,
+                system_audio: false,
+                control: false,
+            },
+        )
+        .unwrap();
+        assert_eq!((profile.width, profile.height), (1918, 1078));
     }
 
     #[test]
