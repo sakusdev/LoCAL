@@ -7,6 +7,15 @@ pub const MAX_TEXT: usize = 16 * 1024;
 pub const MAX_FILE: u64 = 20 * 1024 * 1024 * 1024;
 pub const CHUNK: usize = 1024 * 1024;
 
+pub const CAP_TEXT: &str = "text";
+pub const CAP_FILE: &str = "file";
+pub const CAP_CLIPBOARD: &str = "clipboard";
+pub const CAP_SCREEN_VIEW: &str = "screen.view";
+pub const CAP_SCREEN_CONTROL: &str = "screen.control";
+pub const CAP_SCREEN_AUDIO: &str = "screen.audio";
+pub const CAP_AUDIO: &str = "audio";
+pub const CAP_SENSOR: &str = "sensor";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hello {
     pub version: u8,
@@ -30,6 +39,94 @@ pub enum Request {
         size: u64,
         hash: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenCodec {
+    H264,
+    Vp9,
+    Av1,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenCapabilities {
+    pub codecs: Vec<ScreenCodec>,
+    pub max_width: u32,
+    pub max_height: u32,
+    pub max_fps: u16,
+    pub control: bool,
+    pub system_audio: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenOffer {
+    pub id: String,
+    pub source: String,
+    pub codec: ScreenCodec,
+    pub width: u32,
+    pub height: u32,
+    pub fps: u16,
+    pub system_audio: bool,
+    pub control: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenFrameHeader {
+    pub sequence: u64,
+    pub timestamp_us: u64,
+    pub keyframe: bool,
+    pub payload_len: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceUri {
+    pub device_id: String,
+    pub resource: String,
+}
+
+impl ResourceUri {
+    pub fn parse(value: &str) -> Result<Self> {
+        let rest = value
+            .strip_prefix("lm://")
+            .ok_or_else(|| anyhow::anyhow!("Resource URI must start with lm://"))?;
+        if value.len() > 384 || rest.contains('?') || rest.contains('#') {
+            bail!("Unsupported resource URI");
+        }
+        let (device_id, resource) = rest
+            .split_once('/')
+            .ok_or_else(|| anyhow::anyhow!("Resource URI needs a device and resource"))?;
+        if !valid_hash(device_id) {
+            bail!("Invalid LocalMesh device ID");
+        }
+        if resource.is_empty()
+            || resource.len() > 256
+            || resource.starts_with('/')
+            || resource.ends_with('/')
+        {
+            bail!("Invalid LocalMesh resource path");
+        }
+        for segment in resource.split('/') {
+            if segment.is_empty()
+                || segment == "."
+                || segment == ".."
+                || segment.len() > 80
+                || !segment
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+            {
+                bail!("Invalid LocalMesh resource path");
+            }
+        }
+        Ok(Self {
+            device_id: device_id.to_owned(),
+            resource: resource.to_owned(),
+        })
+    }
+
+    pub fn format(&self) -> String {
+        format!("lm://{}/{}", self.device_id, self.resource)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -128,4 +225,50 @@ pub fn valid_hash(value: &str) -> bool {
         && value
             .bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn localmesh_resource_uri_round_trip() {
+        let id = "a".repeat(64);
+        let uri = ResourceUri::parse(&format!("lm://{id}/screen/main")).unwrap();
+        assert_eq!(uri.device_id, id);
+        assert_eq!(uri.resource, "screen/main");
+        assert_eq!(uri.format(), format!("lm://{}/screen/main", "a".repeat(64)));
+    }
+
+    #[test]
+    fn localmesh_resource_uri_rejects_unsafe_paths() {
+        let id = "b".repeat(64);
+        for path in [
+            format!("http://{id}/screen"),
+            format!("lm://{id}/../screen"),
+            format!("lm://{id}/screen//main"),
+            format!("lm://{id}/screen?control=true"),
+            "lm://not-a-device/screen".to_owned(),
+        ] {
+            assert!(ResourceUri::parse(&path).is_err(), "accepted {path}");
+        }
+    }
+
+    #[test]
+    fn screen_offer_is_cbor_serializable() {
+        let offer = ScreenOffer {
+            id: "session-1".into(),
+            source: "display:0".into(),
+            codec: ScreenCodec::H264,
+            width: 1920,
+            height: 1080,
+            fps: 60,
+            system_audio: true,
+            control: false,
+        };
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&offer, &mut bytes).unwrap();
+        let decoded: ScreenOffer = ciborium::from_reader(bytes.as_slice()).unwrap();
+        assert_eq!(decoded, offer);
+    }
 }
