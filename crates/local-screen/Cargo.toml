@@ -8,3 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 local-core.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+openh264 = "0.9.8"
+windows-capture = "2.0.1"
