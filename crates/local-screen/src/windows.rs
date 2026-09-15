@@ -121,8 +121,8 @@ impl EncodedCaptureBackend for WindowsCaptureBackend {
         }
         if profile.width == 0
             || profile.height == 0
-            || profile.width % 2 != 0
-            || profile.height % 2 != 0
+            || !profile.width.is_multiple_of(2)
+            || !profile.height.is_multiple_of(2)
             || profile.width > SOFTWARE_MAX_WIDTH
             || profile.height > SOFTWARE_MAX_HEIGHT
             || profile.fps == 0
@@ -381,7 +381,7 @@ fn scale_bgra_letterbox(
         .and_then(|pixels| pixels.checked_mul(4))
         .ok_or_else(|| "Scaled frame dimensions overflow".to_owned())?;
     target.resize(target_len, 0);
-    for pixel in target.chunks_exact_mut(4) {
+    for pixel in target.as_chunks_mut::<4>().0 {
         pixel[3] = 255;
     }
 
