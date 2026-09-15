@@ -65,6 +65,9 @@ pub struct Peer {
     pub ready: bool,
     pub code: Option<String>,
     pub local_confirmed: bool,
+    pub capabilities: Vec<String>,
+    pub capabilities_authenticated: bool,
+    pub screen: Option<protocol::ScreenCapabilities>,
 }
 
 #[derive(Clone, Serialize)]
@@ -120,6 +123,12 @@ impl Session {
         self.local_ok.load(Ordering::SeqCst)
             && self.remote_ok.load(Ordering::SeqCst)
             && self.conn.close_reason().is_none()
+    }
+    fn supports(&self, capability: &str) -> bool {
+        self.peer
+            .effective_capabilities()
+            .iter()
+            .any(|value| value == capability)
     }
 }
 
@@ -194,8 +203,7 @@ impl Node {
                 let n = n.clone();
                 tokio::spawn(async move {
                     let result = async {
-                        let conn =
-                            tokio::time::timeout(Duration::from_secs(10), incoming).await??;
+                        let conn = tokio::time::timeout(Duration::from_secs(10), incoming).await??;
                         let result = n.handshake(conn.clone(), false, None).await;
                         if result.is_err() {
                             conn.close(1u32.into(), b"handshake rejected");
@@ -224,6 +232,11 @@ impl Node {
             id: self.id.clone(),
             name: self.name.lock().unwrap().clone(),
             port: self.endpoint.local_addr().unwrap().port(),
+            capabilities: protocol::BASE_CAPABILITIES
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
+            screen: None,
         }
     }
     fn warn(&self, text: String) {
@@ -312,6 +325,8 @@ impl Node {
         {
             bail!("Invalid peer hello");
         }
+        protocol::validate_capabilities(&peer.capabilities, peer.screen.as_ref())?;
+        let effective_capabilities = peer.effective_capabilities();
         let mut material = [0; 32];
         conn.export_keying_material(&mut material, b"LoCAL pairing v1", b"")
             .map_err(|_| anyhow::anyhow!("Pairing exporter failed"))?;
@@ -352,6 +367,9 @@ impl Node {
                 ready: false,
                 code: None,
                 local_confirmed: trusted,
+                capabilities: effective_capabilities,
+                capabilities_authenticated: true,
+                screen: peer.screen,
             },
         );
         let n = self.clone();
@@ -368,8 +386,7 @@ impl Node {
             }
             let mut sessions = n.sessions.lock().unwrap();
             if let Some(current) = sessions.get(&s.peer.id) {
-                if current.conn.stable_id() == s.conn.stable_id() && s.conn.close_reason().is_some()
-                {
+                if current.conn.stable_id() == s.conn.stable_id() && s.conn.close_reason().is_some() {
                     sessions.remove(&s.peer.id);
                 }
             }
@@ -400,12 +417,20 @@ impl Node {
                             if !s.ready() {
                                 bail!("Confirm pairing on both devices first");
                             }
+                            let capability = if channel == "mesh.text" {
+                                protocol::CAP_TEXT
+                            } else if channel == "mesh.clipboard" {
+                                protocol::CAP_CLIPBOARD
+                            } else {
+                                ""
+                            };
                             if uuid::Uuid::parse_str(&id).is_err()
                                 || text.is_empty()
                                 || text.len() > protocol::MAX_TEXT
-                                || !["mesh.text", "mesh.clipboard"].contains(&channel.as_str())
+                                || capability.is_empty()
+                                || !s.supports(capability)
                             {
-                                bail!("Invalid message");
+                                bail!("Invalid or unsupported message");
                             }
                             n.store.lock().unwrap().insert_message(&storage::Message {
                                 id,
@@ -425,6 +450,9 @@ impl Node {
                         } => {
                             if !s.ready() {
                                 bail!("Confirm pairing on both devices first");
+                            }
+                            if !s.supports(protocol::CAP_FILE) {
+                                bail!("Peer did not advertise file transfer support");
                             }
                             n.receive_file(&s, &mut send, &mut recv, id, name, size, hash)
                                 .await?;
@@ -502,6 +530,14 @@ impl Node {
         if !s.ready() {
             bail!("Confirm pairing on both devices first");
         }
+        let capability = if channel == "mesh.clipboard" {
+            protocol::CAP_CLIPBOARD
+        } else {
+            protocol::CAP_TEXT
+        };
+        if !s.supports(capability) {
+            bail!("Peer does not support this channel");
+        }
         let id = uuid::Uuid::new_v4().to_string();
         let (mut send, mut recv) = s.conn.open_bi().await?;
         protocol::write(
@@ -545,10 +581,14 @@ impl Node {
             let session = sessions
                 .get(&p.id)
                 .filter(|s| s.conn.close_reason().is_none());
-            // A broadcast must never rename an authenticated, connected peer.
+            // A broadcast must never rename an authenticated, connected peer or override
+            // its negotiated capabilities.
             if let Some(s) = session {
                 p.name = s.peer.name.clone();
                 p.address = SocketAddr::new(s.conn.remote_address().ip(), s.peer.port).to_string();
+                p.capabilities = s.peer.effective_capabilities();
+                p.capabilities_authenticated = true;
+                p.screen = s.peer.screen.clone();
             }
             p.connected = session.is_some();
             p.trusted = store.trusted(&p.id);
@@ -559,9 +599,23 @@ impl Node {
         peers.sort_by(|a, b| a.name.cmp(&b.name));
         let mut transfers: Vec<_> = self.transfers.lock().unwrap().values().cloned().collect();
         transfers.sort_by_key(|t| std::cmp::Reverse(t.timestamp));
-        Ok(
-            json!({"version":env!("CARGO_PKG_VERSION"),"device":{"id":self.id,"name":*self.name.lock().unwrap(),"port":self.address()?.port(),"addresses":discovery::addresses(self.address()?.port())},"peers":peers,"trusted":store.peers()?,"messages":store.messages()?,"transfers":transfers,"receive_dir":self.receive_dir.to_string_lossy(),"warnings":*self.warnings.lock().unwrap()}),
-        )
+        Ok(json!({
+            "version":env!("CARGO_PKG_VERSION"),
+            "device":{
+                "id":self.id,
+                "name":*self.name.lock().unwrap(),
+                "port":self.address()?.port(),
+                "addresses":discovery::addresses(self.address()?.port()),
+                "capabilities":protocol::BASE_CAPABILITIES,
+                "screen":Value::Null
+            },
+            "peers":peers,
+            "trusted":store.peers()?,
+            "messages":store.messages()?,
+            "transfers":transfers,
+            "receive_dir":self.receive_dir.to_string_lossy(),
+            "warnings":*self.warnings.lock().unwrap()
+        }))
     }
     pub async fn command(self: &Arc<Self>, value: Value) -> Result<Value> {
         let field = |name: &str| -> Result<&str> {
@@ -572,9 +626,9 @@ impl Node {
         };
         match field("op")? {
             "snapshot" => self.snapshot(),
-            "connect" => Ok(
-                json!({"id":self.connect(field("address")?,value.get("peer_id").and_then(Value::as_str)).await?}),
-            ),
+            "connect" => Ok(json!({
+                "id":self.connect(field("address")?,value.get("peer_id").and_then(Value::as_str)).await?
+            })),
             "confirm" => {
                 self.confirm(field("peer_id")?, field("code")?).await?;
                 Ok(json!({}))
@@ -587,12 +641,12 @@ impl Node {
                 self.forget(field("peer_id")?)?;
                 Ok(json!({}))
             }
-            "send_text" => Ok(
-                json!({"id":self.send_text(field("peer_id")?,field("text")?.into(),value.get("channel").and_then(Value::as_str).unwrap_or("mesh.text").into()).await?}),
-            ),
-            "send_file" => Ok(
-                json!({"id":self.send_file(field("peer_id")?,PathBuf::from(field("path")?)).await?}),
-            ),
+            "send_text" => Ok(json!({
+                "id":self.send_text(field("peer_id")?,field("text")?.into(),value.get("channel").and_then(Value::as_str).unwrap_or("mesh.text").into()).await?
+            })),
+            "send_file" => Ok(json!({
+                "id":self.send_file(field("peer_id")?,PathBuf::from(field("path")?)).await?
+            })),
             "accept_file" => {
                 self.decide_file(
                     field("id")?,
