@@ -512,8 +512,7 @@ pub fn validate_screen_offer(
         || offer.height > decode.max_height
         || offer.fps > encode.max_fps
         || offer.fps > decode.max_fps
-        || (offer.system_audio
-            && (!source.system_audio_capture || !viewer.system_audio_playback))
+        || (offer.system_audio && (!source.system_audio_capture || !viewer.system_audio_playback))
         || (offer.control && !source.control_target)
     {
         bail!("Screen offer exceeds negotiated capabilities");

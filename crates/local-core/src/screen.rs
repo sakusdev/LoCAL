@@ -144,9 +144,7 @@ impl Runtime {
         }
     }
 
-    pub(crate) fn advertisement(
-        &self,
-    ) -> (Vec<String>, Option<protocol::ScreenCapabilities>) {
+    pub(crate) fn advertisement(&self) -> (Vec<String>, Option<protocol::ScreenCapabilities>) {
         let screen = self.capabilities.lock().unwrap().clone();
         (protocol::screen_capability_names(screen.as_ref()), screen)
     }
@@ -310,11 +308,7 @@ impl Node {
         self.screen_runtime.states()
     }
 
-    pub async fn offer_screen(
-        &self,
-        peer_id: &str,
-        offer: protocol::ScreenOffer,
-    ) -> Result<bool> {
+    pub async fn offer_screen(&self, peer_id: &str, offer: protocol::ScreenOffer) -> Result<bool> {
         offer.validate()?;
         let session = self.session(peer_id)?;
         if !session.ready() {
@@ -348,8 +342,13 @@ impl Node {
 
         let result = async {
             let (mut send, mut recv) = session.conn.open_bi().await?;
-            protocol::write(&mut send, &protocol::Request::ScreenOffer { offer: offer.clone() })
-                .await?;
+            protocol::write(
+                &mut send,
+                &protocol::Request::ScreenOffer {
+                    offer: offer.clone(),
+                },
+            )
+            .await?;
             send.finish()?;
             let accepted = protocol::read::<protocol::Reply>(&mut recv)
                 .await?
@@ -411,12 +410,8 @@ impl Node {
         if state.direction != "in" || state.status != "active" {
             bail!("Only an active screen viewer can request a keyframe");
         }
-        self.send_screen_signal(
-            &state.peer_id,
-            id,
-            protocol::ScreenSignal::RequestKeyframe,
-        )
-        .await
+        self.send_screen_signal(&state.peer_id, id, protocol::ScreenSignal::RequestKeyframe)
+            .await
     }
 
     async fn send_screen_signal(
@@ -540,7 +535,11 @@ impl Node {
             }
             _ = session.conn.closed() => bail!("Screen source disconnected")
         };
-        self.screen_runtime.decisions.lock().unwrap().remove(&offer.id);
+        self.screen_runtime
+            .decisions
+            .lock()
+            .unwrap()
+            .remove(&offer.id);
         if accepted {
             if !session.ready() {
                 bail!("Pairing is no longer trusted");
@@ -573,7 +572,8 @@ impl Node {
         match signal {
             protocol::ScreenSignal::Stop => {
                 if state.direction == "in" && state.status == "offered" {
-                    if let Some(decision) = self.screen_runtime.decisions.lock().unwrap().remove(id) {
+                    if let Some(decision) = self.screen_runtime.decisions.lock().unwrap().remove(id)
+                    {
                         let _ = decision.send(false);
                     }
                 }
