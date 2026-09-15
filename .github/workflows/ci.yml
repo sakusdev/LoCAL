@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core:
+    name: Rust core, real QUIC integration tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p local-core -p local-cli
+      - run: cargo clippy -p local-core -p local-cli -p local-android -- -D warnings
+      - run: cargo fmt --all -- --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-lock
+          path: Cargo.lock
+

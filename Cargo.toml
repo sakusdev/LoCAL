@@ -1,0 +1,23 @@
+[workspace]
+members = ["crates/local-core", "crates/local-cli", "crates/local-android", "apps/desktop/src-tauri"]
+default-members = ["crates/local-core", "crates/local-cli"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/sakusdev/LoCAL"
+
+[workspace.dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "fs", "signal"] }
+local-core = { path = "crates/local-core" }
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1
+

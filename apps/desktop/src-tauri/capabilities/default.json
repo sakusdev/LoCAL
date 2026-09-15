@@ -1,0 +1,2 @@
+{"identifier":"main","description":"Local UI can choose files and explicitly read or write clipboard text","windows":["main"],"permissions":["core:default","dialog:allow-open","clipboard-manager:allow-read-text","clipboard-manager:allow-write-text"]}
+

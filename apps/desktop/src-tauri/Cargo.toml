@@ -1,0 +1,22 @@
+[package]
+name = "local-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "LoCAL"
+
+[[bin]]
+name = "LoCAL"
+path = "src/main.rs"
+
+[dependencies]
+local-core.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+

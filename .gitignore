@@ -1,0 +1,12 @@
+/target/
+**/node_modules/
+**/build/
+**/.gradle/
+**/local.properties
+**/jniLibs/
+/dist/
+/test-results/
+*.keystore
+*.jks
+.DS_Store
+
