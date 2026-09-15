@@ -120,6 +120,9 @@ impl Node {
         if !session.ready() {
             bail!("Confirm pairing on both devices first");
         }
+        if !session.supports(protocol::CAP_FILE) {
+            bail!("Peer does not support file transfer");
+        }
         let metadata = tokio::fs::metadata(&path)
             .await
             .context("Cannot open selected file")?;

@@ -1,11 +1,13 @@
 use anyhow::{bail, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::HashSet;
 
 pub const VERSION: u8 = 1;
 pub const MAX_FRAME: usize = 96 * 1024;
 pub const MAX_TEXT: usize = 16 * 1024;
 pub const MAX_FILE: u64 = 20 * 1024 * 1024 * 1024;
 pub const CHUNK: usize = 1024 * 1024;
+pub const MAX_CAPABILITIES: usize = 32;
 
 pub const CAP_TEXT: &str = "text";
 pub const CAP_FILE: &str = "file";
@@ -15,6 +17,7 @@ pub const CAP_SCREEN_CONTROL: &str = "screen.control";
 pub const CAP_SCREEN_AUDIO: &str = "screen.audio";
 pub const CAP_AUDIO: &str = "audio";
 pub const CAP_SENSOR: &str = "sensor";
+pub const BASE_CAPABILITIES: &[&str] = &[CAP_TEXT, CAP_FILE, CAP_CLIPBOARD];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hello {
@@ -22,6 +25,25 @@ pub struct Hello {
     pub id: String,
     pub name: String,
     pub port: u16,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen: Option<ScreenCapabilities>,
+}
+
+impl Hello {
+    /// v1 peers created before capability advertisement omit the field entirely.
+    /// Those peers are known to implement the original Text/File/Clipboard MVP.
+    pub fn effective_capabilities(&self) -> Vec<String> {
+        if self.version == VERSION && self.capabilities.is_empty() {
+            BASE_CAPABILITIES
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect()
+        } else {
+            self.capabilities.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +218,48 @@ pub async fn read<T: DeserializeOwned>(stream: &mut quinn::RecvStream) -> Result
     Ok(result)
 }
 
+pub fn valid_capability(value: &str) -> bool {
+    if value.is_empty() || value.len() > 64 || value.starts_with('.') || value.ends_with('.') {
+        return false;
+    }
+    value.split('.').all(|segment| {
+        !segment.is_empty()
+            && segment.len() <= 32
+            && segment
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+    })
+}
+
+pub fn validate_capabilities(values: &[String], screen: Option<&ScreenCapabilities>) -> Result<()> {
+    if values.len() > MAX_CAPABILITIES {
+        bail!("Too many advertised capabilities");
+    }
+    let mut seen = HashSet::with_capacity(values.len());
+    for value in values {
+        if !valid_capability(value) || !seen.insert(value.as_str()) {
+            bail!("Invalid or duplicate capability");
+        }
+    }
+    if let Some(screen) = screen {
+        if !values.iter().any(|value| value == CAP_SCREEN_VIEW)
+            || screen.codecs.is_empty()
+            || screen.codecs.len() > 4
+            || screen.max_width == 0
+            || screen.max_height == 0
+            || screen.max_width > 16_384
+            || screen.max_height > 16_384
+            || screen.max_fps == 0
+            || screen.max_fps > 240
+            || (screen.control && !values.iter().any(|value| value == CAP_SCREEN_CONTROL))
+            || (screen.system_audio && !values.iter().any(|value| value == CAP_SCREEN_AUDIO))
+        {
+            bail!("Invalid screen capability advertisement");
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_name(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 180
@@ -270,5 +334,34 @@ mod tests {
         ciborium::into_writer(&offer, &mut bytes).unwrap();
         let decoded: ScreenOffer = ciborium::from_reader(bytes.as_slice()).unwrap();
         assert_eq!(decoded, offer);
+    }
+
+    #[test]
+    fn legacy_hello_defaults_to_mvp_capabilities() {
+        let id = "c".repeat(64);
+        let json = format!(r#"{{"version":1,"id":"{id}","name":"Old peer","port":53319}}"#);
+        let hello: Hello = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            hello.effective_capabilities(),
+            vec!["text", "file", "clipboard"]
+        );
+        assert!(hello.screen.is_none());
+    }
+
+    #[test]
+    fn capability_validation_rejects_duplicates_and_invalid_screen_metadata() {
+        assert!(validate_capabilities(&["text".into(), "text".into()], None).is_err());
+        assert!(!valid_capability("Screen.View"));
+        assert!(!valid_capability("screen..view"));
+        let screen = ScreenCapabilities {
+            codecs: vec![ScreenCodec::H264],
+            max_width: 1920,
+            max_height: 1080,
+            max_fps: 60,
+            control: false,
+            system_audio: false,
+        };
+        assert!(validate_capabilities(&[CAP_SCREEN_VIEW.into()], Some(&screen)).is_ok());
+        assert!(validate_capabilities(&[CAP_TEXT.into()], Some(&screen)).is_err());
     }
 }

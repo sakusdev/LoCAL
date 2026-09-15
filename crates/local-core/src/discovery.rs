@@ -17,6 +17,8 @@ struct Beacon {
     id: String,
     name: String,
     port: u16,
+    #[serde(default)]
+    capabilities: Vec<String>,
 }
 
 pub fn addresses(port: u16) -> Vec<String> {
@@ -62,18 +64,61 @@ async fn run(node: Arc<Node>) -> anyhow::Result<()> {
             _ = node.shutdown.notified() => break,
             _ = tick.tick() => {
                 let hello = node.hello();
-                let bytes = serde_json::to_vec(&Beacon { magic:"LOCAL_DISCOVERY".into(),version:hello.version,id:hello.id,name:hello.name,port:hello.port })?;
+                let bytes = serde_json::to_vec(&Beacon {
+                    magic:"LOCAL_DISCOVERY".into(),
+                    version:hello.version,
+                    id:hello.id,
+                    name:hello.name,
+                    port:hello.port,
+                    capabilities:hello.capabilities,
+                })?;
                 let mut targets = vec![Ipv4Addr::BROADCAST,GROUP];
-                for iface in if_addrs::get_if_addrs().unwrap_or_default() { if let if_addrs::IfAddr::V4(addr) = iface.addr { if let Some(broadcast) = addr.broadcast { if !targets.contains(&broadcast) { targets.push(broadcast); } } } }
+                for iface in if_addrs::get_if_addrs().unwrap_or_default() {
+                    if let if_addrs::IfAddr::V4(addr) = iface.addr {
+                        if let Some(broadcast) = addr.broadcast {
+                            if !targets.contains(&broadcast) { targets.push(broadcast); }
+                        }
+                    }
+                }
                 for target in targets { let _ = socket.send_to(&bytes,(target,PORT)).await; }
             },
             received = socket.recv_from(&mut buffer) => {
                 let (len,source) = received?;
                 if let Ok(beacon) = serde_json::from_slice::<Beacon>(&buffer[..len]) {
-                    if beacon.magic!="LOCAL_DISCOVERY" || beacon.version!=1 || beacon.id==node.id || !crate::protocol::valid_hash(&beacon.id) || beacon.port==0 || beacon.name.is_empty() || beacon.name.len()>80 || beacon.name.chars().any(char::is_control) { continue; }
+                    if beacon.magic!="LOCAL_DISCOVERY"
+                        || beacon.version!=1
+                        || beacon.id==node.id
+                        || !crate::protocol::valid_hash(&beacon.id)
+                        || beacon.port==0
+                        || beacon.name.is_empty()
+                        || beacon.name.len()>80
+                        || beacon.name.chars().any(char::is_control)
+                        || crate::protocol::validate_capabilities(&beacon.capabilities,None).is_err()
+                    { continue; }
+                    let capabilities = if beacon.capabilities.is_empty() {
+                        crate::protocol::BASE_CAPABILITIES.iter().map(|value| (*value).to_owned()).collect()
+                    } else {
+                        beacon.capabilities
+                    };
                     let mut peers = node.peers.lock().unwrap();
-                    if peers.len() >= 256 && !peers.contains_key(&beacon.id) { peers.retain(|_,p| crate::now()-p.last_seen<20_000); if peers.len()>=256 { continue; } }
-                    peers.insert(beacon.id.clone(),Peer{id:beacon.id,name:beacon.name,address:SocketAddr::new(source.ip(),beacon.port).to_string(),last_seen:crate::now(),connected:false,trusted:false,ready:false,code:None,local_confirmed:false});
+                    if peers.len() >= 256 && !peers.contains_key(&beacon.id) {
+                        peers.retain(|_,p| crate::now()-p.last_seen<20_000);
+                        if peers.len()>=256 { continue; }
+                    }
+                    peers.insert(beacon.id.clone(),Peer{
+                        id:beacon.id,
+                        name:beacon.name,
+                        address:SocketAddr::new(source.ip(),beacon.port).to_string(),
+                        last_seen:crate::now(),
+                        connected:false,
+                        trusted:false,
+                        ready:false,
+                        code:None,
+                        local_confirmed:false,
+                        capabilities,
+                        capabilities_authenticated:false,
+                        screen:None,
+                    });
                 }
             }
         }
