@@ -1,0 +1,39 @@
+name: Fix Windows screen test
+on:
+  push:
+    branches: [sol/windows-screen-capture]
+    paths: [.github/workflows/fix-windows-screen-test.yml]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Fix letterbox assertion
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/local-screen/src/windows.rs')
+          text = path.read_text()
+          old = '        let center = (2 * 4) * 4;\n        assert_eq!(&target[center..center + 4], &[255, 255, 255, 255]);'
+          new = '        let center = (2 * 8 + 4) * 4;\n        assert_eq!(&target[center..center + 4], &[255, 255, 255, 255]);'
+          if text.count(old) != 1:
+              raise SystemExit('expected letterbox assertion not found exactly once')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cargo fmt --all
+      - name: Commit test and formatting fix
+        shell: bash
+        run: |
+          git config user.name 'LoCAL CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add crates/local-screen/src/lib.rs crates/local-screen/src/windows.rs
+          git commit -m 'Fix Windows letterbox test and formatting'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
