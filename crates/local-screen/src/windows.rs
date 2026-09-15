@@ -215,21 +215,20 @@ impl SoftwareH264Handler {
             return Err("Captured BGRA frame has an unexpected byte length".into());
         }
 
-        let encoded_pixels = if source_width == self.profile.width
-            && source_height == self.profile.height
-        {
-            pixels
-        } else {
-            scale_bgra_letterbox(
-                pixels,
-                source_width,
-                source_height,
-                self.profile.width,
-                self.profile.height,
-                &mut self.scaled_bgra,
-            )?;
-            self.scaled_bgra.as_slice()
-        };
+        let encoded_pixels =
+            if source_width == self.profile.width && source_height == self.profile.height {
+                pixels
+            } else {
+                scale_bgra_letterbox(
+                    pixels,
+                    source_width,
+                    source_height,
+                    self.profile.width,
+                    self.profile.height,
+                    &mut self.scaled_bgra,
+                )?;
+                self.scaled_bgra.as_slice()
+            };
 
         let bgra = BgraSliceU8::new(
             encoded_pixels,
@@ -293,9 +292,7 @@ impl GraphicsCaptureApiHandler for SoftwareH264Handler {
         // Own this fallback frame locally before mutably borrowing the encoder
         // state again. The software path already performs CPU color conversion,
         // so this copy keeps the borrow boundary simple and deterministic.
-        let pixels = buffer
-            .as_nopadding_buffer(&mut self.compact_bgra)
-            .to_vec();
+        let pixels = buffer.as_nopadding_buffer(&mut self.compact_bgra).to_vec();
         let timestamp_us = u64::try_from(self.started.elapsed().as_micros()).unwrap_or(u64::MAX);
         let Some(encoded) =
             self.encode_pixels(&pixels, source_width, source_height, timestamp_us)?
@@ -339,7 +336,10 @@ impl EncodedCaptureSession for WindowsCaptureSession {
     }
 
     fn request_keyframe(&self) -> Result<()> {
-        let control = self.control.as_ref().context("Capture session is stopped")?;
+        let control = self
+            .control
+            .as_ref()
+            .context("Capture session is stopped")?;
         control.callback().lock().force_keyframe();
         Ok(())
     }
@@ -388,13 +388,11 @@ fn scale_bgra_letterbox(
     let (scaled_width, scaled_height) = if u64::from(target_width) * u64::from(source_height)
         <= u64::from(target_height) * u64::from(source_width)
     {
-        let height = (u64::from(source_height) * u64::from(target_width)
-            / u64::from(source_width))
+        let height = (u64::from(source_height) * u64::from(target_width) / u64::from(source_width))
             .max(1) as u32;
         (target_width, height.min(target_height))
     } else {
-        let width = (u64::from(source_width) * u64::from(target_height)
-            / u64::from(source_height))
+        let width = (u64::from(source_width) * u64::from(target_height) / u64::from(source_height))
             .max(1) as u32;
         (width.min(target_width), target_height)
     };
@@ -455,7 +453,7 @@ mod tests {
         scale_bgra_letterbox(&source, 4, 4, 8, 4, &mut target).unwrap();
         assert_eq!(target.len(), 8 * 4 * 4);
         assert_eq!(&target[0..4], &[0, 0, 0, 255]);
-        let center = (2 * 4) * 4;
+        let center = (2 * 8 + 4) * 4;
         assert_eq!(&target[center..center + 4], &[255, 255, 255, 255]);
     }
 }
