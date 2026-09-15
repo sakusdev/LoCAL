@@ -545,6 +545,11 @@ impl Node {
             let session = sessions
                 .get(&p.id)
                 .filter(|s| s.conn.close_reason().is_none());
+            // A broadcast must never rename an authenticated, connected peer.
+            if let Some(s) = session {
+                p.name = s.peer.name.clone();
+                p.address = SocketAddr::new(s.conn.remote_address().ip(), s.peer.port).to_string();
+            }
             p.connected = session.is_some();
             p.trusted = store.trusted(&p.id);
             p.ready = session.is_some_and(|s| s.ready());

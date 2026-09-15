@@ -10,6 +10,24 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  ui:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: tests/ui
+      - run: npx playwright install --with-deps chromium
+        working-directory: tests/ui
+      - run: npm test
+        working-directory: tests/ui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-screenshots
+          path: tests/ui/screenshots
   core:
     name: Rust core, real QUIC integration tests
     runs-on: ubuntu-24.04
