@@ -729,5 +729,9 @@ impl Node {
         for cancel in self.cancellations.lock().unwrap().values() {
             cancel.cancel();
         }
+        // Background connection tasks may retain Arc<Node> briefly after shutdown.
+        // Release the process-instance guard here so a deliberate restart does not
+        // depend on scheduler timing or task destruction.
+        let _ = FileExt::unlock(&self._lock);
     }
 }
