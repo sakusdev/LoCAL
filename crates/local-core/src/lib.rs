@@ -203,7 +203,8 @@ impl Node {
                 let n = n.clone();
                 tokio::spawn(async move {
                     let result = async {
-                        let conn = tokio::time::timeout(Duration::from_secs(10), incoming).await??;
+                        let conn =
+                            tokio::time::timeout(Duration::from_secs(10), incoming).await??;
                         let result = n.handshake(conn.clone(), false, None).await;
                         if result.is_err() {
                             conn.close(1u32.into(), b"handshake rejected");
@@ -386,7 +387,8 @@ impl Node {
             }
             let mut sessions = n.sessions.lock().unwrap();
             if let Some(current) = sessions.get(&s.peer.id) {
-                if current.conn.stable_id() == s.conn.stable_id() && s.conn.close_reason().is_some() {
+                if current.conn.stable_id() == s.conn.stable_id() && s.conn.close_reason().is_some()
+                {
                     sessions.remove(&s.peer.id);
                 }
             }
