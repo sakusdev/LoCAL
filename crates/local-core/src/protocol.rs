@@ -302,14 +302,10 @@ pub fn validate_capabilities(values: &[String], screen: Option<&ScreenCapabiliti
             if screen.control_target && (!has(CAP_SCREEN_CONTROL) || screen.encode.is_none()) {
                 bail!("screen.control requires a controllable share endpoint");
             }
-            if screen.system_audio_capture
-                && (!has(CAP_SCREEN_AUDIO) || screen.encode.is_none())
-            {
+            if screen.system_audio_capture && (!has(CAP_SCREEN_AUDIO) || screen.encode.is_none()) {
                 bail!("screen.audio capture requires a share endpoint");
             }
-            if screen.system_audio_playback
-                && (!has(CAP_SCREEN_AUDIO) || screen.decode.is_none())
-            {
+            if screen.system_audio_playback && (!has(CAP_SCREEN_AUDIO) || screen.decode.is_none()) {
                 bail!("screen.audio playback requires a view endpoint");
             }
         }
