@@ -1,6 +1,6 @@
-# LoCAL
+# LoCAL — Local Connectivity & Access Layer
 
-LoCAL is a local-first peer-to-peer app based on the LocalMesh design. No account, cloud server, analytics, or Internet connection is needed to exchange data on your LAN.
+LoCAL is a local-first peer-to-peer app and connectivity layer based on the LocalMesh design. No account, cloud server, analytics, or Internet connection is needed to exchange data on your LAN.
 
 Rust core · QUIC / TLS 1.3 · Android · Windows · Linux · macOS · CLI
 
@@ -22,11 +22,18 @@ Pixel 7aは **Android arm64-v8a APK**、一般的なPCは **Windows x64 setup.ex
 | Android | JNIコア、ファイル選択・書き出し、接続通知 |
 | GUI / CLI | 日本語UI、PC/スマホ、CLI対話モード + JSON IPC |
 
-音声、センサー、QR、mDNS、IPv6、マルチホップ、画像クリップボードは今後の機能です。初期APKは開発署名、Windows/macOSは商用コード署名なしのプレビューです。
+## 次の段階
+
+LoCALは単なるLAN内ファイル共有ではなく、端末がローカル機能を安全に公開できる **Local Connectivity & Access Layer** を目指します。将来のリソースは `lm://<device-id>/<resource>` で表現し、たとえば `screen/main`、`audio/output`、`sensors/gyro` のように扱います。
+
+次の主要機能はCapability negotiation、QRペアリング、画面共有、音声、センサー、mDNS / IPv6です。画面共有は閲覧・システム音声・リモート操作を別権限に分離し、最初はLAN内の閲覧専用セッションから実装します。マルチホップと画像クリップボードはその後の段階です。
+
+初期APKは開発署名、Windows/macOSは商用コード署名なしのプレビューです。
 
 - [使い方とトラブルシューティング](docs/QUICKSTART.md)
 - [ビルド・Actions・Android署名](docs/BUILDING.md)
 - [プロトコルと構成](docs/PROTOCOL.md)
+- [画面共有の設計](docs/SCREEN_SHARING.md)
 - [セキュリティモデルと制限](docs/SECURITY.md)
 
 ```sh
