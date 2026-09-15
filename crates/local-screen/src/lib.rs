@@ -4,8 +4,10 @@
 //! negotiates a safe profile and moves already encoded video access units toward
 //! the LocalMesh transport layer, avoiding mandatory GPU -> CPU readback.
 
-use anyhow::{bail, Result};
-use local_core::protocol::{ScreenCapabilities, ScreenCodec, ScreenFrameHeader};
+use anyhow::{bail, Context, Result};
+use local_core::protocol::{
+    ScreenCapabilities, ScreenCodec, ScreenFrameHeader, ScreenMediaCapabilities,
+};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_ENCODED_FRAME: usize = 16 * 1024 * 1024;
@@ -93,7 +95,7 @@ pub struct NegotiatedScreen {
     pub control: bool,
 }
 
-fn sane(capabilities: &ScreenCapabilities) -> bool {
+fn sane(capabilities: &ScreenMediaCapabilities) -> bool {
     !capabilities.codecs.is_empty()
         && capabilities.codecs.len() <= 4
         && capabilities.max_width > 0
@@ -104,7 +106,7 @@ fn sane(capabilities: &ScreenCapabilities) -> bool {
         && capabilities.max_fps <= 240
 }
 
-/// Chooses a profile supported by both the sharing source and viewer.
+/// Chooses a profile supported by the source encoder and viewer decoder.
 ///
 /// H.264 wins when available because the initial LoCAL target is broad hardware
 /// interoperability. Optional audio/control requests gracefully negotiate down
@@ -114,8 +116,16 @@ pub fn negotiate(
     viewer: &ScreenCapabilities,
     request: &ScreenRequest,
 ) -> Result<NegotiatedScreen> {
-    if !sane(source)
-        || !sane(viewer)
+    let encode = source
+        .encode
+        .as_ref()
+        .context("Source cannot encode screen video")?;
+    let decode = viewer
+        .decode
+        .as_ref()
+        .context("Viewer cannot decode screen video")?;
+    if !sane(encode)
+        || !sane(decode)
         || request.max_width == 0
         || request.max_height == 0
         || request.max_fps == 0
@@ -125,21 +135,23 @@ pub fn negotiate(
     let codec = CODEC_PREFERENCE
         .iter()
         .copied()
-        .find(|codec| source.codecs.contains(codec) && viewer.codecs.contains(codec))
+        .find(|codec| encode.codecs.contains(codec) && decode.codecs.contains(codec))
         .ok_or_else(|| anyhow::anyhow!("No common screen codec"))?;
     Ok(NegotiatedScreen {
         codec,
         width: request
             .max_width
-            .min(source.max_width)
-            .min(viewer.max_width),
+            .min(encode.max_width)
+            .min(decode.max_width),
         height: request
             .max_height
-            .min(source.max_height)
-            .min(viewer.max_height),
-        fps: request.max_fps.min(source.max_fps).min(viewer.max_fps),
-        system_audio: request.system_audio && source.system_audio && viewer.system_audio,
-        control: request.control && source.control && viewer.control,
+            .min(encode.max_height)
+            .min(decode.max_height),
+        fps: request.max_fps.min(encode.max_fps).min(decode.max_fps),
+        system_audio: request.system_audio
+            && source.system_audio_capture
+            && viewer.system_audio_playback,
+        control: request.control && source.control_target,
     })
 }
 
@@ -198,7 +210,10 @@ impl FrameValidator {
 /// where possible, native hardware encoding before returning frames here.
 pub trait EncodedCaptureBackend: Send + Sync {
     fn backend_name(&self) -> &'static str;
-    fn capabilities(&self) -> ScreenCapabilities;
+    fn encode_capabilities(&self) -> ScreenMediaCapabilities;
+    fn system_audio_capture(&self) -> bool {
+        false
+    }
     fn sources(&self) -> Result<Vec<CaptureSource>>;
     fn start(
         &self,
@@ -219,24 +234,42 @@ pub trait EncodedCaptureSession: Send {
 mod tests {
     use super::*;
 
-    fn caps(codecs: Vec<ScreenCodec>) -> ScreenCapabilities {
-        ScreenCapabilities {
+    fn media(codecs: Vec<ScreenCodec>) -> ScreenMediaCapabilities {
+        ScreenMediaCapabilities {
             codecs,
             max_width: 3840,
             max_height: 2160,
             max_fps: 120,
-            control: true,
-            system_audio: true,
+        }
+    }
+
+    fn source(codecs: Vec<ScreenCodec>) -> ScreenCapabilities {
+        ScreenCapabilities {
+            encode: Some(media(codecs)),
+            decode: None,
+            control_target: true,
+            system_audio_capture: true,
+            system_audio_playback: false,
+        }
+    }
+
+    fn viewer(codecs: Vec<ScreenCodec>) -> ScreenCapabilities {
+        ScreenCapabilities {
+            encode: None,
+            decode: Some(media(codecs)),
+            control_target: false,
+            system_audio_capture: false,
+            system_audio_playback: true,
         }
     }
 
     #[test]
     fn negotiation_prefers_h264_and_clamps_limits() {
-        let source = caps(vec![ScreenCodec::Av1, ScreenCodec::H264]);
-        let mut viewer = caps(vec![ScreenCodec::H264, ScreenCodec::Vp9]);
-        viewer.max_width = 2560;
-        viewer.max_fps = 60;
-        viewer.system_audio = false;
+        let source = source(vec![ScreenCodec::Av1, ScreenCodec::H264]);
+        let mut viewer = viewer(vec![ScreenCodec::H264, ScreenCodec::Vp9]);
+        viewer.decode.as_mut().unwrap().max_width = 2560;
+        viewer.decode.as_mut().unwrap().max_fps = 60;
+        viewer.system_audio_playback = false;
         let request = ScreenRequest {
             max_width: 1920,
             max_height: 1080,
@@ -255,10 +288,11 @@ mod tests {
     }
 
     #[test]
-    fn negotiation_requires_a_common_codec() {
-        let source = caps(vec![ScreenCodec::Av1]);
-        let viewer = caps(vec![ScreenCodec::H264]);
+    fn negotiation_requires_encode_decode_roles_and_common_codec() {
+        let source = source(vec![ScreenCodec::Av1]);
+        let viewer = viewer(vec![ScreenCodec::H264]);
         assert!(negotiate(&source, &viewer, &ScreenRequest::default()).is_err());
+        assert!(negotiate(&viewer, &viewer, &ScreenRequest::default()).is_err());
     }
 
     #[test]

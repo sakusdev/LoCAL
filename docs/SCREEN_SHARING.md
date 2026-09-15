@@ -16,13 +16,14 @@ lm://<64-hex-device-id>/sensors/gyro
 
 The URI identifies a resource only. Trust still comes from the peer TLS identity and stored pairing record; a URI must never bypass pairing or permissions.
 
-The protocol core defines independent capabilities:
+The protocol core defines independent screen capabilities:
 
-- `screen.view` — receive encoded screen video
-- `screen.audio` — receive captured system audio with a screen session
-- `screen.control` — send remote pointer / keyboard input
+- `screen.share` — capture and encode a local screen/window
+- `screen.view` — decode and display a remote screen stream
+- `screen.audio` — system-audio capture and/or playback, as declared by directional metadata
+- `screen.control` — accept remote pointer / keyboard control while sharing
 
-A peer may expose `screen.view` without either of the other capabilities. UI must never infer control permission from view permission.
+Screen metadata is intentionally directional. `encode` describes the codecs, dimensions and FPS the device can produce; `decode` describes what it can consume. A device may support one without the other, or support different codecs in each direction. `control_target`, `system_audio_capture`, and `system_audio_playback` describe endpoint roles independently so the UI never infers control or audio permission from video support.
 
 ## Implementation boundary
 
@@ -35,7 +36,7 @@ platform capture + hardware encoder
    ↓
 local-screen
    ├─ source metadata
-   ├─ capability/profile negotiation
+   ├─ directional capability/profile negotiation
    ├─ encoded-frame safety validation
    └─ backend/session interfaces
    ↓
@@ -44,19 +45,19 @@ local-core / QUIC transport
 
 `local-core` never needs to understand Windows GPU textures, PipeWire buffers, ScreenCaptureKit surfaces or Android MediaProjection objects. `local-screen` also does **not** require every backend to copy full RGBA frames through Rust-owned memory. A platform backend should capture and hardware-encode natively where possible, then expose encoded access units.
 
-This boundary exists specifically to keep a future zero-copy or near-zero-copy path possible on Windows and Android. Current `local-screen` negotiation prefers H.264, clamps resolution/FPS to limits supported by both peers, and caps one encoded access unit at 16 MiB before it enters the transport path.
+This boundary exists specifically to keep a future zero-copy or near-zero-copy path possible on Windows and Android. Current `local-screen` negotiation matches the source encoder against the viewer decoder, prefers H.264, clamps resolution/FPS to limits supported by both peers, and caps one encoded access unit at 16 MiB before it enters the transport path.
 
 ## Session phases
 
 ```text
 paired QUIC session
       │
-      ├─ authenticated capability negotiation
+      ├─ authenticated directional capability negotiation
       │
       ├─ enumerate local capture sources
       │
       ├─ screen offer
-      │    source / codec / size / fps
+      │    resource / codec / size / fps / optional audio+control
       │
       ├─ explicit receiver accept
       │
@@ -75,10 +76,10 @@ The existing v1 Text/File request framing remains unchanged. Screen sharing is a
 The initial codec preference is:
 
 1. H.264 for broad hardware encode/decode support
-2. VP9 when both peers advertise it
-3. AV1 when hardware support is available on both ends
+2. VP9 when the source encoder and viewer decoder both advertise it
+3. AV1 when compatible hardware support is available in both required directions
 
-A `ScreenOffer` declares the selected source, codec, width, height and target FPS. Video payloads must not be packed into the existing 96 KiB CBOR control frames. Instead, screen video uses a dedicated QUIC stream. Each encoded access unit is preceded by a compact `ScreenFrameHeader` containing sequence number, monotonic timestamp, keyframe flag and payload length.
+A `ScreenOffer` contains a UUID session ID, a safe LocalMesh resource path such as `screen/display/display-0`, the selected codec, width, height, target FPS, and requested optional features. Video payloads must not be packed into the existing 96 KiB CBOR control frames. Instead, screen video uses a dedicated QUIC stream. Each encoded access unit is preceded by a compact `ScreenFrameHeader` containing sequence number, monotonic timestamp, keyframe flag and payload length.
 
 The receiver enforces negotiated maximum resolution, frame rate and encoded-frame limits before allocation. Decoders must reject unreasonable dimensions, backwards frame sequence/timestamps and integer-overflowing lengths.
 
@@ -90,7 +91,7 @@ A later low-latency mode may use QUIC DATAGRAM for independently decodable chunk
 
 ## Capture backends
 
-Platform capture belongs outside `local-core`. Each backend implements the `local-screen` encoded-capture boundary and reports real capabilities only when its capture/encoder path is available.
+Platform capture belongs outside `local-core`. Each backend implements the `local-screen` encoded-capture boundary and reports real encode capabilities only when its capture/encoder path is available. Decode capability belongs to the viewer/rendering backend and is advertised separately.
 
 ### Windows
 
@@ -106,13 +107,13 @@ Preferred path on Wayland: xdg-desktop-portal + PipeWire. On X11, use an explici
 
 ### Android
 
-Use MediaProjection. Android must show the operating-system capture consent dialog; LoCAL must never attempt to suppress or work around it. MediaCodec is the preferred hardware encoder.
+Use MediaProjection. Android must show the operating-system capture consent dialog; LoCAL must never attempt to suppress or work around it. MediaCodec is the preferred hardware encoder/decoder.
 
 ## Remote control
 
-Remote control is deliberately later than view-only sharing.
+Remote control is deliberately later than view-only sharing. `screen.control` means the sharing endpoint can be controlled; it does not imply that every accepted screen session automatically grants control.
 
-Permissions are split into:
+Permissions are split conceptually into:
 
 ```text
 screen.view
@@ -126,13 +127,13 @@ Control messages use normalized coordinates rather than sender pixels so differe
 
 ## Audio
 
-System audio is a separate `screen.audio` capability. It should use Opus at 48 kHz over its own logical transport and timestamps tied to the same monotonic session clock as video. Microphone forwarding is a different resource and must not be enabled implicitly with screen audio.
+System audio is negotiated separately from video. A source must advertise `screen.audio` plus `system_audio_capture`; a viewer must advertise `screen.audio` plus `system_audio_playback`. It should use Opus at 48 kHz over its own logical transport and timestamps tied to the same monotonic session clock as video. Microphone forwarding is a different resource and must not be enabled implicitly with screen audio.
 
 ## Security requirements
 
 - screen sharing requires an already paired TLS-authenticated peer
 - incoming offers require explicit acceptance unless the user creates a narrowly scoped remembered permission
-- `screen.view`, system audio and control are independent permissions
+- share, view, system audio and control roles are independently advertised and authorized
 - capture state must be visibly indicated on the source device
 - closing the local capture indicator terminates the remote stream
 - no Internet rendezvous or cloud relay is implied by this design
@@ -150,13 +151,21 @@ System audio is a separate `screen.audio` capability. It should use Opus at 48 k
 - authenticated capability negotiation with v1 fallback
 - protocol and security documentation
 
-### Phase S0.5 — capture boundary
+### Phase S0.5 — capture boundary ✅
 
 - `local-screen` workspace crate
 - source metadata and safe LocalMesh resource paths
-- H.264 → VP9 → AV1 profile negotiation
+- source-encode ↔ viewer-decode H.264 → VP9 → AV1 profile negotiation
 - encoded access-unit size/order validation
 - platform backend/session interfaces that keep raw GPU surfaces outside `local-core`
+
+### Phase S0.75 — session control
+
+- screen offer / accept / reject / stop messages
+- dedicated video-stream initialization frame
+- keyframe request control message
+- strict session ownership and pairing checks
+- bounded pending/active session state
 
 ### Phase S1 — desktop view-only prototype
 

@@ -12,6 +12,7 @@ pub const MAX_CAPABILITIES: usize = 32;
 pub const CAP_TEXT: &str = "text";
 pub const CAP_FILE: &str = "file";
 pub const CAP_CLIPBOARD: &str = "clipboard";
+pub const CAP_SCREEN_SHARE: &str = "screen.share";
 pub const CAP_SCREEN_VIEW: &str = "screen.view";
 pub const CAP_SCREEN_CONTROL: &str = "screen.control";
 pub const CAP_SCREEN_AUDIO: &str = "screen.audio";
@@ -63,7 +64,7 @@ pub enum Request {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ScreenCodec {
     H264,
@@ -72,25 +73,56 @@ pub enum ScreenCodec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScreenCapabilities {
+pub struct ScreenMediaCapabilities {
     pub codecs: Vec<ScreenCodec>,
     pub max_width: u32,
     pub max_height: u32,
     pub max_fps: u16,
-    pub control: bool,
-    pub system_audio: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenCapabilities {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encode: Option<ScreenMediaCapabilities>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decode: Option<ScreenMediaCapabilities>,
+    #[serde(default)]
+    pub control_target: bool,
+    #[serde(default)]
+    pub system_audio_capture: bool,
+    #[serde(default)]
+    pub system_audio_playback: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScreenOffer {
     pub id: String,
-    pub source: String,
+    /// LocalMesh resource path, for example `screen/display/display-0`.
+    pub resource: String,
     pub codec: ScreenCodec,
     pub width: u32,
     pub height: u32,
     pub fps: u16,
     pub system_audio: bool,
     pub control: bool,
+}
+
+impl ScreenOffer {
+    pub fn validate(&self) -> Result<()> {
+        if uuid::Uuid::parse_str(&self.id).is_err()
+            || !valid_resource_path(&self.resource)
+            || !self.resource.starts_with("screen/")
+            || self.width == 0
+            || self.height == 0
+            || self.width > 16_384
+            || self.height > 16_384
+            || self.fps == 0
+            || self.fps > 240
+        {
+            bail!("Invalid screen offer");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,24 +153,8 @@ impl ResourceUri {
         if !valid_hash(device_id) {
             bail!("Invalid LocalMesh device ID");
         }
-        if resource.is_empty()
-            || resource.len() > 256
-            || resource.starts_with('/')
-            || resource.ends_with('/')
-        {
+        if !valid_resource_path(resource) {
             bail!("Invalid LocalMesh resource path");
-        }
-        for segment in resource.split('/') {
-            if segment.is_empty()
-                || segment == "."
-                || segment == ".."
-                || segment.len() > 80
-                || !segment
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
-            {
-                bail!("Invalid LocalMesh resource path");
-            }
         }
         Ok(Self {
             device_id: device_id.to_owned(),
@@ -231,6 +247,22 @@ pub fn valid_capability(value: &str) -> bool {
     })
 }
 
+fn validate_screen_media(media: &ScreenMediaCapabilities) -> bool {
+    if media.codecs.is_empty()
+        || media.codecs.len() > 4
+        || media.max_width == 0
+        || media.max_height == 0
+        || media.max_width > 16_384
+        || media.max_height > 16_384
+        || media.max_fps == 0
+        || media.max_fps > 240
+    {
+        return false;
+    }
+    let mut codecs = HashSet::with_capacity(media.codecs.len());
+    media.codecs.iter().all(|codec| codecs.insert(*codec))
+}
+
 pub fn validate_capabilities(values: &[String], screen: Option<&ScreenCapabilities>) -> Result<()> {
     if values.len() > MAX_CAPABILITIES {
         bail!("Too many advertised capabilities");
@@ -241,23 +273,63 @@ pub fn validate_capabilities(values: &[String], screen: Option<&ScreenCapabiliti
             bail!("Invalid or duplicate capability");
         }
     }
-    if let Some(screen) = screen {
-        if !values.iter().any(|value| value == CAP_SCREEN_VIEW)
-            || screen.codecs.is_empty()
-            || screen.codecs.len() > 4
-            || screen.max_width == 0
-            || screen.max_height == 0
-            || screen.max_width > 16_384
-            || screen.max_height > 16_384
-            || screen.max_fps == 0
-            || screen.max_fps > 240
-            || (screen.control && !values.iter().any(|value| value == CAP_SCREEN_CONTROL))
-            || (screen.system_audio && !values.iter().any(|value| value == CAP_SCREEN_AUDIO))
-        {
-            bail!("Invalid screen capability advertisement");
+    let has = |capability: &str| values.iter().any(|value| value == capability);
+    let has_screen_capability = has(CAP_SCREEN_SHARE)
+        || has(CAP_SCREEN_VIEW)
+        || has(CAP_SCREEN_CONTROL)
+        || has(CAP_SCREEN_AUDIO);
+    match screen {
+        None if has_screen_capability => bail!("Screen capability metadata is missing"),
+        None => {}
+        Some(screen) => {
+            if screen.encode.is_none() && screen.decode.is_none() {
+                bail!("Screen metadata has no encode or decode role");
+            }
+            if let Some(encode) = &screen.encode {
+                if !has(CAP_SCREEN_SHARE) || !validate_screen_media(encode) {
+                    bail!("Invalid screen encode capability advertisement");
+                }
+            } else if has(CAP_SCREEN_SHARE) {
+                bail!("screen.share requires encode metadata");
+            }
+            if let Some(decode) = &screen.decode {
+                if !has(CAP_SCREEN_VIEW) || !validate_screen_media(decode) {
+                    bail!("Invalid screen decode capability advertisement");
+                }
+            } else if has(CAP_SCREEN_VIEW) {
+                bail!("screen.view requires decode metadata");
+            }
+            if screen.control_target && (!has(CAP_SCREEN_CONTROL) || screen.encode.is_none()) {
+                bail!("screen.control requires a controllable share endpoint");
+            }
+            if screen.system_audio_capture && (!has(CAP_SCREEN_AUDIO) || screen.encode.is_none()) {
+                bail!("screen.audio capture requires a share endpoint");
+            }
+            if screen.system_audio_playback && (!has(CAP_SCREEN_AUDIO) || screen.decode.is_none()) {
+                bail!("screen.audio playback requires a view endpoint");
+            }
         }
     }
     Ok(())
+}
+
+pub fn valid_resource_path(resource: &str) -> bool {
+    if resource.is_empty()
+        || resource.len() > 256
+        || resource.starts_with('/')
+        || resource.ends_with('/')
+    {
+        return false;
+    }
+    resource.split('/').all(|segment| {
+        !segment.is_empty()
+            && segment != "."
+            && segment != ".."
+            && segment.len() <= 80
+            && segment
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+    })
 }
 
 pub fn validate_name(name: &str) -> Result<()> {
@@ -295,6 +367,15 @@ pub fn valid_hash(value: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn media(codecs: Vec<ScreenCodec>) -> ScreenMediaCapabilities {
+        ScreenMediaCapabilities {
+            codecs,
+            max_width: 1920,
+            max_height: 1080,
+            max_fps: 60,
+        }
+    }
+
     #[test]
     fn localmesh_resource_uri_round_trip() {
         let id = "a".repeat(64);
@@ -319,10 +400,10 @@ mod tests {
     }
 
     #[test]
-    fn screen_offer_is_cbor_serializable() {
+    fn screen_offer_is_valid_and_cbor_serializable() {
         let offer = ScreenOffer {
-            id: "session-1".into(),
-            source: "display:0".into(),
+            id: uuid::Uuid::new_v4().to_string(),
+            resource: "screen/display/display-0".into(),
             codec: ScreenCodec::H264,
             width: 1920,
             height: 1080,
@@ -330,6 +411,7 @@ mod tests {
             system_audio: true,
             control: false,
         };
+        offer.validate().unwrap();
         let mut bytes = Vec::new();
         ciborium::into_writer(&offer, &mut bytes).unwrap();
         let decoded: ScreenOffer = ciborium::from_reader(bytes.as_slice()).unwrap();
@@ -349,19 +431,37 @@ mod tests {
     }
 
     #[test]
-    fn capability_validation_rejects_duplicates_and_invalid_screen_metadata() {
+    fn screen_roles_require_matching_capabilities() {
+        let screen = ScreenCapabilities {
+            encode: Some(media(vec![ScreenCodec::H264])),
+            decode: Some(media(vec![ScreenCodec::H264, ScreenCodec::Vp9])),
+            control_target: true,
+            system_audio_capture: true,
+            system_audio_playback: true,
+        };
+        let capabilities = vec![
+            CAP_SCREEN_SHARE.into(),
+            CAP_SCREEN_VIEW.into(),
+            CAP_SCREEN_CONTROL.into(),
+            CAP_SCREEN_AUDIO.into(),
+        ];
+        validate_capabilities(&capabilities, Some(&screen)).unwrap();
+        assert!(validate_capabilities(&[CAP_SCREEN_VIEW.into()], Some(&screen)).is_err());
+        let duplicate = ScreenCapabilities {
+            encode: Some(media(vec![ScreenCodec::H264, ScreenCodec::H264])),
+            decode: None,
+            control_target: false,
+            system_audio_capture: false,
+            system_audio_playback: false,
+        };
+        assert!(validate_capabilities(&[CAP_SCREEN_SHARE.into()], Some(&duplicate)).is_err());
+    }
+
+    #[test]
+    fn capability_validation_rejects_duplicates_and_screen_without_metadata() {
         assert!(validate_capabilities(&["text".into(), "text".into()], None).is_err());
         assert!(!valid_capability("Screen.View"));
         assert!(!valid_capability("screen..view"));
-        let screen = ScreenCapabilities {
-            codecs: vec![ScreenCodec::H264],
-            max_width: 1920,
-            max_height: 1080,
-            max_fps: 60,
-            control: false,
-            system_audio: false,
-        };
-        assert!(validate_capabilities(&[CAP_SCREEN_VIEW.into()], Some(&screen)).is_ok());
-        assert!(validate_capabilities(&[CAP_TEXT.into()], Some(&screen)).is_err());
+        assert!(validate_capabilities(&[CAP_SCREEN_SHARE.into()], None).is_err());
     }
 }
