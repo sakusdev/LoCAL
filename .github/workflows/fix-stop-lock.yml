@@ -1,0 +1,49 @@
+name: Patch shutdown lock lifecycle
+on:
+  push:
+    branches: [sol/screen-session-control]
+    paths: [.github/workflows/fix-stop-lock.yml]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Release instance lock during explicit shutdown
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('crates/local-core/src/lib.rs')
+          text = path.read_text()
+          old = '''        self.endpoint.close(0u32.into(), b"LoCAL closed");
+          for cancel in self.cancellations.lock().unwrap().values() {
+              cancel.cancel();
+          }
+      }
+  }
+  '''
+          new = '''        self.endpoint.close(0u32.into(), b"LoCAL closed");
+          for cancel in self.cancellations.lock().unwrap().values() {
+              cancel.cancel();
+          }
+          // Background connection tasks may retain Arc<Node> briefly after shutdown.
+          // Release the process-instance guard here so a deliberate restart does not
+          // depend on scheduler timing or task destruction.
+          let _ = FileExt::unlock(&self._lock);
+      }
+  }
+  '''
+          if old not in text:
+              raise SystemExit('expected Node::stop block not found')
+          path.write_text(text.replace(old, new, 1))
+      - name: Commit lifecycle fix
+        shell: bash
+        run: |
+          git config user.name 'LoCAL CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add crates/local-core/src/lib.rs
+          git commit -m 'Release instance lock during explicit shutdown'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
