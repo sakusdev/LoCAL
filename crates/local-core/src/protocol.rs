@@ -90,7 +90,7 @@ impl ResourceUri {
         let rest = value
             .strip_prefix("lm://")
             .ok_or_else(|| anyhow::anyhow!("Resource URI must start with lm://"))?;
-        if value.len() > 384 || rest.contains(['?', '#']) {
+        if value.len() > 384 || rest.contains('?') || rest.contains('#') {
             bail!("Unsupported resource URI");
         }
         let (device_id, resource) = rest
