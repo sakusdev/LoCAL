@@ -24,6 +24,15 @@ jobs:
       - run: cargo test --locked -p local-core -p local-cli
       - run: cargo clippy --locked -p local-core -p local-cli -p local-android -- -D warnings
       - run: cargo fmt --all -- --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify desktop and mobile UI behavior
+        working-directory: tests/ui
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm test
       - id: release
         run: |
           python3 - <<'PY'
@@ -84,6 +93,9 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev patchelf libfuse2
       - name: Build native CLI
         run: cargo build --locked --release -p local-cli --target ${{ matrix.target }}
+      - name: Test native file operations and QUIC sessions
+        if: matrix.platform != 'windows-arm64'
+        run: cargo test --locked -p local-core -p local-cli --target ${{ matrix.target }}
       - name: Install desktop build tooling
         working-directory: apps/desktop
         run: npm ci

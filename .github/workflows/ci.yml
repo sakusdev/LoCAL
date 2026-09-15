@@ -29,8 +29,12 @@ jobs:
           name: ui-screenshots
           path: tests/ui/screenshots
   core:
-    name: Rust core, real QUIC integration tests
-    runs-on: ubuntu-24.04
+    name: Rust core / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -45,5 +49,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: dependency-lock
+          name: dependency-lock-${{ matrix.os }}
           path: Cargo.lock

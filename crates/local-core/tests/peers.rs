@@ -185,3 +185,80 @@ fn traversal_reserved_names_and_hashes_are_rejected() {
     assert!(!valid_hash("../../anything"));
     assert!(valid_hash(&"a".repeat(64)));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resumes_persisted_bytes_and_rejects_corrupt_partial() {
+    let temp = tempfile::tempdir().unwrap();
+    let a = start(&temp.path().join("a"), "Sender").await;
+    let b = start(&temp.path().join("b"), "Receiver").await;
+    pair(&a, &b).await;
+    let bytes: Vec<u8> = (0..3_100_017).map(|n| (n % 251) as u8).collect();
+    let source = temp.path().join("resume.bin");
+    std::fs::write(&source, &bytes).unwrap();
+    let dir = b.receive_dir.join(".partial");
+    std::fs::create_dir_all(&dir).unwrap();
+    let partial = dir.join(format!("{}-{}.part", a.id, blake3::hash(&bytes).to_hex()));
+    for corrupt in [true, false] {
+        let mut prefix = bytes[..1_048_576].to_vec();
+        if corrupt {
+            prefix[777] ^= 1;
+        }
+        std::fs::write(&partial, prefix).unwrap();
+        let id = a.send_file(&b.id, source.clone()).await.unwrap();
+        let state = until(&b, |s| {
+            s["transfers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["status"] == "offered")
+        })
+        .await;
+        let offer = state["transfers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["status"] == "offered")
+            .unwrap();
+        b.decide_file(offer["id"].as_str().unwrap(), true).unwrap();
+        let state = until(&a, |s| {
+            s["transfers"].as_array().unwrap().iter().any(|t| {
+                t["id"] == id
+                    && ["completed", "failed"].contains(&t["status"].as_str().unwrap_or(""))
+            })
+        })
+        .await;
+        let transfer = state["transfers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == id)
+            .unwrap();
+        if corrupt {
+            assert_eq!(transfer["status"], "failed");
+            assert_eq!(std::fs::metadata(&partial).unwrap().len(), 0);
+            assert_eq!(
+                std::fs::read_dir(&b.receive_dir)
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .filter(|e| e.path().is_file())
+                    .count(),
+                0
+            );
+        } else {
+            assert_eq!(transfer["status"], "completed");
+            let received = b.snapshot().unwrap()["transfers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|t| t["status"] == "completed")
+                .unwrap()["path"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            assert_eq!(std::fs::read(received).unwrap(), bytes);
+            assert!(!partial.exists());
+        }
+    }
+    a.stop();
+    b.stop();
+}

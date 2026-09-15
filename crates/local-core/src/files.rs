@@ -17,6 +17,11 @@ use tokio::{
 
 async fn hash_file(path: &Path) -> Result<(String, u64)> {
     let mut file = tokio::fs::File::open(path).await?;
+    hash_open_file(&mut file).await
+}
+
+async fn hash_open_file(file: &mut tokio::fs::File) -> Result<(String, u64)> {
+    file.seek(std::io::SeekFrom::Start(0)).await?;
     let metadata = file.metadata().await?;
     if !metadata.is_file() || metadata.len() > protocol::MAX_FILE {
         bail!("Select a regular file up to 20 GiB");
@@ -187,7 +192,7 @@ impl Node {
         let mut buffer = vec![0u8; protocol::CHUNK];
         self.progress(id, "transferring", sent);
         while sent < size {
-            let max = buffer.len().min((size - sent) as usize);
+            let max = (buffer.len() as u64).min(size - sent) as usize;
             let count = file.read(&mut buffer[..max]).await?;
             if count == 0 {
                 bail!("File changed while sending");
@@ -294,7 +299,7 @@ impl Node {
         let mut received = offset;
         let mut buffer = vec![0u8; protocol::CHUNK];
         while received < size {
-            let max = buffer.len().min((size - received) as usize);
+            let max = (buffer.len() as u64).min(size - received) as usize;
             let count =
                 tokio::time::timeout(Duration::from_secs(30), recv.read(&mut buffer[..max]))
                     .await??
@@ -316,7 +321,9 @@ impl Node {
         file.flush().await?;
         file.sync_all().await?;
         self.progress(id, "verifying", received);
-        let (actual, actual_size) = hash_file(&partial).await?;
+        // Read through the handle that owns the lock: Windows range locks reject
+        // reads made through a second handle, even from this process.
+        let (actual, actual_size) = hash_open_file(&mut file).await?;
         if actual != hash || actual_size != size {
             file.set_len(0).await?;
             bail!("BLAKE3 verification failed. The partial file was reset; resend the original");
