@@ -34,21 +34,23 @@ Screen metadata is directional. `encode` describes codecs and limits available w
 
 `control_target` requires `screen.control` and an encode/share role. `system_audio_capture` requires `screen.audio` plus an encode role; `system_audio_playback` requires `screen.audio` plus a decode role. Duplicate codecs, zero dimensions/FPS, dimensions above 16384, FPS above 240, or inconsistent role/capability combinations are rejected.
 
-Current v0.1 builds advertise only `text`, `file`, and `clipboard`; screen capability advertisement begins only when a real capture or decode backend is available.
+Current v0.1 builds advertise only `text`, `file`, and `clipboard`; screen capability advertisement begins only when a real capture or decode backend calls the core capability registration API before connecting peers.
 
 The local state snapshot exposes both `capabilities` and `capabilities_authenticated`. Connected peers always use the TLS-authenticated Hello values, preventing a forged discovery beacon from overriding a live session.
 
 ## Framing
 
-Operations open separate QUIC bidirectional streams. CBOR frames use a four-byte unsigned big-endian length, capped at 96KiB. Trailing bytes in the CBOR frame are rejected. Tagged requests:
+Normal operations open separate QUIC bidirectional streams. CBOR frames use a four-byte unsigned big-endian length, capped at 96KiB. Trailing bytes in the CBOR frame are rejected. Tagged requests:
 
 - `confirm`
 - `message`: UUID `id`, `channel` (`mesh.text` or `mesh.clipboard`), UTF-8 `text` (1–16384 bytes)
 - `file`: UUID `id`, safe basename `name`, `size` (0–20GiB), BLAKE3 `hash` (64 lowercase hexadecimal characters)
+- `screen_offer`: validated `ScreenOffer`
+- `screen_signal`: UUID session `id` plus `stop` or `request_keyframe`
 
-Replies contain `ok`, `error`, `offset`. Text is saved before acknowledgement with a composite message ID / peer ID / direction key. Timestamps are local. UI polls local state independently of network framing.
+Replies contain `ok`, `error`, `offset`, and an optional `accepted` decision used by screen offers. Text is saved before acknowledgement with a composite message ID / peer ID / direction key. Timestamps are local. UI polls local state independently of network framing.
 
-Message and file handlers verify that the authenticated peer advertised the relevant capability before accepting data. Legacy v1 peers remain compatible through the original-MVP fallback described above.
+Message, file and screen handlers verify pairing and the authenticated peer capability metadata before accepting data. Legacy v1 peers remain compatible through the original-MVP fallback described above.
 
 ## Files
 
@@ -70,18 +72,37 @@ lm://<64-hex-device-id>/sensors/gyro
 
 `lm://` is an application-level identifier only. It does not replace TLS identity, pairing, capability checks or per-feature permission. Query strings, fragments, empty path segments and `.` / `..` traversal are rejected by the core parser.
 
-## Screen-sharing extension foundation
+## Screen-sharing session protocol
 
-The core contains serializable screen protocol primitives for future negotiated sessions:
+The core now contains the transport/session layer needed by future capture and rendering backends:
 
 - codec enum: H.264, VP9 and AV1
 - directional screen media limits: encode/decode codecs, maximum dimensions and FPS
 - endpoint features: control target, system-audio capture and system-audio playback
 - `ScreenOffer`: UUID session ID, LocalMesh screen resource path, selected codec, dimensions, FPS and requested optional features
+- explicit accept/reject decision with a 60-second pending-offer timeout
+- `ScreenSignal`: stop or request-keyframe control messages
+- `ScreenStreamInit`: UUID, codec, dimensions and FPS binding a video stream to an accepted offer
 - `ScreenFrameHeader`: sequence, monotonic timestamp, keyframe flag and encoded payload length
 
-Large encoded video frames are **not** carried inside the 96KiB CBOR control-frame limit. Screen video will use a dedicated QUIC stream after explicit offer / accept negotiation. See [`SCREEN_SHARING.md`](SCREEN_SHARING.md) for capture backends, permission separation, transport policy and implementation phases.
+An offer is accepted only if the authenticated source encoder and viewer decoder both support the selected codec and limits. Optional audio requires source capture plus viewer playback capability. A control request requires the source to advertise itself as a control target. Session IDs are checked against the authenticated peer so a peer cannot signal or attach a video stream to another peer's session.
+
+Large encoded video frames are **not** carried inside the 96KiB CBOR control-frame limit. After an offer is accepted, the source opens a dedicated QUIC unidirectional stream. The stream begins with one normal CBOR `ScreenStreamInit`, then switches to a fixed binary layout for each encoded access unit:
+
+```text
+8 bytes  sequence        unsigned big-endian
+8 bytes  timestamp_us    unsigned big-endian
+1 byte   keyframe        0 or 1
+4 bytes  payload_len     unsigned big-endian
+N bytes  encoded payload
+```
+
+The fixed frame header is 21 bytes. `payload_len` must be 1–16MiB; invalid flags or oversized lengths are rejected before allocation. Sequence numbers must strictly increase and timestamps must not move backwards. QUIC transport allows at most 8 concurrent unidirectional streams per connection.
+
+The incoming video queue retains at most four encoded frames and drops the oldest queued frame under renderer backpressure. This deliberately favors freshness over building unlimited latency. Screen state is bounded to 8 active/pending sessions and 50 visible session records. Disconnect and local shutdown close pending/active screen state.
+
+Remote pointer/keyboard events and system-audio media transport are **not** implemented by this session layer yet; their capabilities remain independently negotiated for later phases. See [`SCREEN_SHARING.md`](SCREEN_SHARING.md) for capture backends, permission separation and the remaining implementation sequence.
 
 ## Storage and future work
 
-`identity.json` has mode 0600 on Unix, its data directory 0700. A process lock prevents simultaneous use. SQLite WAL stores trusted IDs, name and messages; UI shows latest 200 messages. File content is separate. Future channels include screen sharing, Opus, sensors, clipboard images and custom channels; v1 does not silently accept them.
+`identity.json` has mode 0600 on Unix, its data directory 0700. A process lock prevents simultaneous use. SQLite WAL stores trusted IDs, name and messages; UI shows latest 200 messages. File content is separate. Future channels include platform screen capture/rendering, Opus, sensors, clipboard images and custom channels; v1 does not silently accept them.
