@@ -4,12 +4,12 @@ use local_core::{
     protocol::{ScreenCapabilities, ScreenOffer, ScreenSignal},
     Config, Node, ScreenVideoSender,
 };
-use local_screen::{
-    negotiate, CapturePoll, CaptureSource, EncodedCaptureBackend, EncodedCaptureSession,
-    EncodedVideoFrame, ScreenRequest,
-};
 #[cfg(target_os = "windows")]
 use local_screen::windows::WindowsCaptureBackend;
+use local_screen::{
+    negotiate, CapturePoll, EncodedCaptureBackend, EncodedCaptureSession, EncodedVideoFrame,
+    ScreenRequest,
+};
 use serde_json::{json, Value};
 use std::{
     sync::{mpsc, Arc},
@@ -108,8 +108,7 @@ impl ScreenRuntime {
 
         let defaults = ScreenRequest::default();
         let screen_request = ScreenRequest {
-            max_width: optional_u32(request, "max_width", defaults.max_width)?
-                .min(source.width),
+            max_width: optional_u32(request, "max_width", defaults.max_width)?.min(source.width),
             max_height: optional_u32(request, "max_height", defaults.max_height)?
                 .min(source.height),
             max_fps: optional_u16(request, "max_fps", defaults.max_fps)?,
@@ -223,18 +222,15 @@ fn spawn_screen_pipeline(
 ) {
     let (latest_tx, mut latest_rx) = watch::channel::<Option<EncodedVideoFrame>>(None);
     let (control_tx, control_rx) = mpsc::channel::<ScreenSignal>();
-    let mut capture_task = tokio::task::spawn_blocking(move || {
-        run_capture_loop(capture, control_rx, latest_tx)
-    });
+    let mut capture_task =
+        tokio::task::spawn_blocking(move || run_capture_loop(capture, control_rx, latest_tx));
 
     tokio::spawn(async move {
         let mut remote_stopped = false;
         loop {
             tokio::select! {
                 capture_result = &mut capture_task => {
-                    if capture_result.is_err() || capture_result.is_ok_and(|result| result.is_err()) {
-                        break;
-                    }
+                    let _ = capture_result;
                     break;
                 }
                 signal = signals.recv() => {
