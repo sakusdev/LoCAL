@@ -2,7 +2,10 @@ mod discovery;
 mod files;
 mod identity;
 pub mod protocol;
+mod screen;
 mod storage;
+
+pub use screen::{ScreenSessionState, ScreenVideoPacket, ScreenVideoReceiver, ScreenVideoSender};
 
 use anyhow::{bail, Context, Result};
 use fs2::FileExt;
@@ -144,6 +147,7 @@ pub struct Node {
     transfers: Mutex<HashMap<String, Transfer>>,
     decisions: Mutex<HashMap<String, oneshot::Sender<bool>>>,
     cancellations: Mutex<HashMap<String, Arc<Cancel>>>,
+    screen_runtime: screen::Runtime,
     warnings: Mutex<Vec<String>>,
     stopping: AtomicBool,
     shutdown: Notify,
@@ -188,6 +192,7 @@ impl Node {
             transfers: Mutex::new(HashMap::new()),
             decisions: Mutex::new(HashMap::new()),
             cancellations: Mutex::new(HashMap::new()),
+            screen_runtime: screen::Runtime::new(),
             warnings: Mutex::new(vec![]),
             stopping: AtomicBool::new(false),
             shutdown: Notify::new(),
@@ -228,16 +233,14 @@ impl Node {
         Ok(self.endpoint.local_addr()?)
     }
     fn hello(&self) -> Hello {
+        let (capabilities, screen) = self.screen_advertisement();
         Hello {
             version: protocol::VERSION,
             id: self.id.clone(),
             name: self.name.lock().unwrap().clone(),
             port: self.endpoint.local_addr().unwrap().port(),
-            capabilities: protocol::BASE_CAPABILITIES
-                .iter()
-                .map(|value| (*value).to_owned())
-                .collect(),
-            screen: None,
+            capabilities,
+            screen,
         }
     }
     fn warn(&self, text: String) {
@@ -381,6 +384,11 @@ impl Node {
         let n = self.clone();
         let s = session.clone();
         tokio::spawn(async move {
+            n.serve_screen_streams(s).await;
+        });
+        let n = self.clone();
+        let s = session.clone();
+        tokio::spawn(async move {
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(120)) => { if !s.ready() { s.conn.close(2u32.into(), b"pairing expired"); } },
                 _ = s.conn.closed() => {}
@@ -392,6 +400,8 @@ impl Node {
                     sessions.remove(&s.peer.id);
                 }
             }
+            drop(sessions);
+            n.screen_runtime.peer_closed(&s.peer.id);
         });
         if trusted {
             self.send_confirmation(session).await?;
@@ -459,6 +469,14 @@ impl Node {
                             n.receive_file(&s, &mut send, &mut recv, id, name, size, hash)
                                 .await?;
                         }
+                        Request::ScreenOffer { offer } => {
+                            let accepted = n.receive_screen_offer(&s, offer).await?;
+                            protocol::write(&mut send, &Reply::screen(accepted)).await?;
+                        }
+                        Request::ScreenSignal { id, signal } => {
+                            n.receive_screen_signal(&s, &id, signal)?;
+                            protocol::write(&mut send, &Reply::ok(0)).await?;
+                        }
                     }
                     Ok::<_, anyhow::Error>(())
                 }
@@ -476,6 +494,8 @@ impl Node {
         {
             sessions.remove(&session.peer.id);
         }
+        drop(sessions);
+        self.screen_runtime.peer_closed(&session.peer.id);
     }
 
     fn persist_trust(&self, s: &Session) -> Result<()> {
@@ -512,6 +532,7 @@ impl Node {
         self.send_confirmation(s).await
     }
     pub fn disconnect(&self, id: &str) {
+        self.screen_runtime.peer_closed(id);
         if let Some(s) = self.sessions.lock().unwrap().remove(id) {
             s.conn.close(0u32.into(), b"disconnected locally");
         }
@@ -601,6 +622,8 @@ impl Node {
         peers.sort_by(|a, b| a.name.cmp(&b.name));
         let mut transfers: Vec<_> = self.transfers.lock().unwrap().values().cloned().collect();
         transfers.sort_by_key(|t| std::cmp::Reverse(t.timestamp));
+        let (device_capabilities, device_screen) = self.screen_advertisement();
+        let screen_sessions = self.screen_sessions();
         Ok(json!({
             "version":env!("CARGO_PKG_VERSION"),
             "device":{
@@ -608,13 +631,14 @@ impl Node {
                 "name":*self.name.lock().unwrap(),
                 "port":self.address()?.port(),
                 "addresses":discovery::addresses(self.address()?.port()),
-                "capabilities":protocol::BASE_CAPABILITIES,
-                "screen":Value::Null
+                "capabilities":device_capabilities,
+                "screen":device_screen
             },
             "peers":peers,
             "trusted":store.peers()?,
             "messages":store.messages()?,
             "transfers":transfers,
+            "screen_sessions":screen_sessions,
             "receive_dir":self.receive_dir.to_string_lossy(),
             "warnings":*self.warnings.lock().unwrap()
         }))
@@ -663,6 +687,24 @@ impl Node {
                 self.cancel_transfer(field("id")?)?;
                 Ok(json!({}))
             }
+            "accept_screen" => {
+                self.decide_screen(
+                    field("id")?,
+                    value
+                        .get("accept")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                )?;
+                Ok(json!({}))
+            }
+            "stop_screen" => {
+                self.stop_screen(field("id")?).await?;
+                Ok(json!({}))
+            }
+            "request_screen_keyframe" => {
+                self.request_screen_keyframe(field("id")?).await?;
+                Ok(json!({}))
+            }
             "set_name" => {
                 let name = field("name")?.trim();
                 if name.is_empty() || name.len() > 80 || name.chars().any(char::is_control) {
@@ -682,9 +724,14 @@ impl Node {
     pub fn stop(&self) {
         self.stopping.store(true, Ordering::SeqCst);
         self.shutdown.notify_waiters();
+        self.screen_runtime.stop_all();
         self.endpoint.close(0u32.into(), b"LoCAL closed");
         for cancel in self.cancellations.lock().unwrap().values() {
             cancel.cancel();
         }
+        // Background connection tasks may retain Arc<Node> briefly after shutdown.
+        // Release the process-instance guard here so a deliberate restart does not
+        // depend on scheduler timing or task destruction.
+        let _ = FileExt::unlock(&self._lock);
     }
 }

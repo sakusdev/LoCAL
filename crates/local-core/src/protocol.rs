@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -8,6 +8,8 @@ pub const MAX_TEXT: usize = 16 * 1024;
 pub const MAX_FILE: u64 = 20 * 1024 * 1024 * 1024;
 pub const CHUNK: usize = 1024 * 1024;
 pub const MAX_CAPABILITIES: usize = 32;
+pub const MAX_SCREEN_FRAME: usize = 16 * 1024 * 1024;
+pub const SCREEN_FRAME_HEADER: usize = 21;
 
 pub const CAP_TEXT: &str = "text";
 pub const CAP_FILE: &str = "file";
@@ -61,6 +63,13 @@ pub enum Request {
         name: String,
         size: u64,
         hash: String,
+    },
+    ScreenOffer {
+        offer: ScreenOffer,
+    },
+    ScreenSignal {
+        id: String,
+        signal: ScreenSignal,
     },
 }
 
@@ -123,6 +132,48 @@ impl ScreenOffer {
         }
         Ok(())
     }
+
+    pub fn stream_init(&self) -> ScreenStreamInit {
+        ScreenStreamInit {
+            id: self.id.clone(),
+            codec: self.codec,
+            width: self.width,
+            height: self.height,
+            fps: self.fps,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenSignal {
+    Stop,
+    RequestKeyframe,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenStreamInit {
+    pub id: String,
+    pub codec: ScreenCodec,
+    pub width: u32,
+    pub height: u32,
+    pub fps: u16,
+}
+
+impl ScreenStreamInit {
+    pub fn validate(&self) -> Result<()> {
+        if uuid::Uuid::parse_str(&self.id).is_err()
+            || self.width == 0
+            || self.height == 0
+            || self.width > 16_384
+            || self.height > 16_384
+            || self.fps == 0
+            || self.fps > 240
+        {
+            bail!("Invalid screen stream initialization");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +182,15 @@ pub struct ScreenFrameHeader {
     pub timestamp_us: u64,
     pub keyframe: bool,
     pub payload_len: u32,
+}
+
+impl ScreenFrameHeader {
+    pub fn validate(&self) -> Result<()> {
+        if self.payload_len == 0 || self.payload_len as usize > MAX_SCREEN_FRAME {
+            bail!("Invalid encoded screen frame length");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,6 +232,8 @@ pub struct Reply {
     pub ok: bool,
     pub error: String,
     pub offset: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted: Option<bool>,
 }
 impl Reply {
     pub fn ok(offset: u64) -> Self {
@@ -179,6 +241,15 @@ impl Reply {
             ok: true,
             error: String::new(),
             offset,
+            accepted: None,
+        }
+    }
+    pub fn screen(accepted: bool) -> Self {
+        Self {
+            ok: true,
+            error: String::new(),
+            offset: 0,
+            accepted: Some(accepted),
         }
     }
     pub fn error(error: impl ToString) -> Self {
@@ -186,6 +257,7 @@ impl Reply {
             ok: false,
             error: error.to_string(),
             offset: 0,
+            accepted: None,
         }
     }
     pub fn check(self) -> Result<u64> {
@@ -193,6 +265,12 @@ impl Reply {
             bail!("{}", self.error);
         }
         Ok(self.offset)
+    }
+    pub fn screen_decision(self) -> Result<bool> {
+        if !self.ok {
+            bail!("{}", self.error);
+        }
+        self.accepted.context("Missing screen decision")
     }
 }
 
@@ -232,6 +310,82 @@ pub async fn read<T: DeserializeOwned>(stream: &mut quinn::RecvStream) -> Result
         bail!("Trailing protocol bytes");
     }
     Ok(result)
+}
+
+pub fn encode_screen_frame_header(header: &ScreenFrameHeader) -> Result<[u8; SCREEN_FRAME_HEADER]> {
+    header.validate()?;
+    let mut bytes = [0u8; SCREEN_FRAME_HEADER];
+    bytes[0..8].copy_from_slice(&header.sequence.to_be_bytes());
+    bytes[8..16].copy_from_slice(&header.timestamp_us.to_be_bytes());
+    bytes[16] = u8::from(header.keyframe);
+    bytes[17..21].copy_from_slice(&header.payload_len.to_be_bytes());
+    Ok(bytes)
+}
+
+pub fn decode_screen_frame_header(bytes: &[u8; SCREEN_FRAME_HEADER]) -> Result<ScreenFrameHeader> {
+    if bytes[16] > 1 {
+        bail!("Invalid screen frame keyframe flag");
+    }
+    let header = ScreenFrameHeader {
+        sequence: u64::from_be_bytes(bytes[0..8].try_into()?),
+        timestamp_us: u64::from_be_bytes(bytes[8..16].try_into()?),
+        keyframe: bytes[16] == 1,
+        payload_len: u32::from_be_bytes(bytes[17..21].try_into()?),
+    };
+    header.validate()?;
+    Ok(header)
+}
+
+pub async fn write_screen_frame(
+    stream: &mut quinn::SendStream,
+    header: &ScreenFrameHeader,
+    payload: &[u8],
+) -> Result<()> {
+    if payload.len() != header.payload_len as usize {
+        bail!("Screen frame payload length does not match header");
+    }
+    let bytes = encode_screen_frame_header(header)?;
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        stream.write_all(&bytes).await?;
+        stream.write_all(payload).await?;
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    .context("Screen video write timed out")??;
+    Ok(())
+}
+
+pub async fn read_screen_frame(
+    stream: &mut quinn::RecvStream,
+) -> Result<Option<(ScreenFrameHeader, Vec<u8>)>> {
+    let mut raw = [0u8; SCREEN_FRAME_HEADER];
+    let first = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        stream.read(&mut raw[..1]),
+    )
+    .await
+    .context("Screen video read timed out")??;
+    let Some(first) = first else {
+        return Ok(None);
+    };
+    if first != 1 {
+        bail!("Invalid screen stream read");
+    }
+    tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        stream.read_exact(&mut raw[1..]),
+    )
+    .await
+    .context("Screen frame header timed out")??;
+    let header = decode_screen_frame_header(&raw)?;
+    let mut payload = vec![0u8; header.payload_len as usize];
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        stream.read_exact(&mut payload),
+    )
+    .await
+    .context("Screen frame payload timed out")??;
+    Ok(Some((header, payload)))
 }
 
 pub fn valid_capability(value: &str) -> bool {
@@ -313,6 +467,59 @@ pub fn validate_capabilities(values: &[String], screen: Option<&ScreenCapabiliti
     Ok(())
 }
 
+pub fn screen_capability_names(screen: Option<&ScreenCapabilities>) -> Vec<String> {
+    let mut values: Vec<String> = BASE_CAPABILITIES
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect();
+    let Some(screen) = screen else {
+        return values;
+    };
+    if screen.encode.is_some() {
+        values.push(CAP_SCREEN_SHARE.into());
+    }
+    if screen.decode.is_some() {
+        values.push(CAP_SCREEN_VIEW.into());
+    }
+    if screen.control_target {
+        values.push(CAP_SCREEN_CONTROL.into());
+    }
+    if screen.system_audio_capture || screen.system_audio_playback {
+        values.push(CAP_SCREEN_AUDIO.into());
+    }
+    values
+}
+
+pub fn validate_screen_offer(
+    source: &ScreenCapabilities,
+    viewer: &ScreenCapabilities,
+    offer: &ScreenOffer,
+) -> Result<()> {
+    offer.validate()?;
+    let encode = source
+        .encode
+        .as_ref()
+        .context("Screen source does not advertise an encoder")?;
+    let decode = viewer
+        .decode
+        .as_ref()
+        .context("Screen viewer does not advertise a decoder")?;
+    if !encode.codecs.contains(&offer.codec)
+        || !decode.codecs.contains(&offer.codec)
+        || offer.width > encode.max_width
+        || offer.width > decode.max_width
+        || offer.height > encode.max_height
+        || offer.height > decode.max_height
+        || offer.fps > encode.max_fps
+        || offer.fps > decode.max_fps
+        || (offer.system_audio && (!source.system_audio_capture || !viewer.system_audio_playback))
+        || (offer.control && !source.control_target)
+    {
+        bail!("Screen offer exceeds negotiated capabilities");
+    }
+    Ok(())
+}
+
 pub fn valid_resource_path(resource: &str) -> bool {
     if resource.is_empty()
         || resource.len() > 256
@@ -376,6 +583,26 @@ mod tests {
         }
     }
 
+    fn share_caps() -> ScreenCapabilities {
+        ScreenCapabilities {
+            encode: Some(media(vec![ScreenCodec::H264, ScreenCodec::Av1])),
+            decode: None,
+            control_target: true,
+            system_audio_capture: true,
+            system_audio_playback: false,
+        }
+    }
+
+    fn view_caps() -> ScreenCapabilities {
+        ScreenCapabilities {
+            encode: None,
+            decode: Some(media(vec![ScreenCodec::H264, ScreenCodec::Vp9])),
+            control_target: false,
+            system_audio_capture: false,
+            system_audio_playback: true,
+        }
+    }
+
     #[test]
     fn localmesh_resource_uri_round_trip() {
         let id = "a".repeat(64);
@@ -412,10 +639,45 @@ mod tests {
             control: false,
         };
         offer.validate().unwrap();
+        validate_screen_offer(&share_caps(), &view_caps(), &offer).unwrap();
         let mut bytes = Vec::new();
         ciborium::into_writer(&offer, &mut bytes).unwrap();
         let decoded: ScreenOffer = ciborium::from_reader(bytes.as_slice()).unwrap();
         assert_eq!(decoded, offer);
+    }
+
+    #[test]
+    fn screen_offer_rejects_unnegotiated_features() {
+        let mut offer = ScreenOffer {
+            id: uuid::Uuid::new_v4().to_string(),
+            resource: "screen/display/display-0".into(),
+            codec: ScreenCodec::Vp9,
+            width: 1920,
+            height: 1080,
+            fps: 60,
+            system_audio: false,
+            control: false,
+        };
+        assert!(validate_screen_offer(&share_caps(), &view_caps(), &offer).is_err());
+        offer.codec = ScreenCodec::H264;
+        offer.width = 3840;
+        assert!(validate_screen_offer(&share_caps(), &view_caps(), &offer).is_err());
+    }
+
+    #[test]
+    fn screen_frame_header_has_fixed_binary_layout() {
+        let header = ScreenFrameHeader {
+            sequence: 7,
+            timestamp_us: 42_000,
+            keyframe: true,
+            payload_len: 1234,
+        };
+        let bytes = encode_screen_frame_header(&header).unwrap();
+        assert_eq!(bytes.len(), SCREEN_FRAME_HEADER);
+        assert_eq!(decode_screen_frame_header(&bytes).unwrap(), header);
+        let mut invalid = bytes;
+        invalid[16] = 2;
+        assert!(decode_screen_frame_header(&invalid).is_err());
     }
 
     #[test]
@@ -463,5 +725,10 @@ mod tests {
         assert!(!valid_capability("Screen.View"));
         assert!(!valid_capability("screen..view"));
         assert!(validate_capabilities(&[CAP_SCREEN_SHARE.into()], None).is_err());
+        validate_capabilities(
+            &screen_capability_names(Some(&share_caps())),
+            Some(&share_caps()),
+        )
+        .unwrap();
     }
 }

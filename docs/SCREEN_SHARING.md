@@ -62,14 +62,15 @@ paired QUIC session
       ├─ explicit receiver accept
       │
       ├─ dedicated video stream
-      │    frame headers + encoded access units
+      │    ScreenStreamInit
+      │    21-byte frame headers + encoded access units
       │
-      ├─ optional audio stream
+      ├─ optional audio stream (later phase)
       │
-      └─ optional control stream
+      └─ optional control stream (later phase)
 ```
 
-The existing v1 Text/File request framing remains unchanged. Screen sharing is added as a negotiated extension so old peers continue to interoperate for v1 features. Discovery capability fields are only hints; the TLS-authenticated Hello is authoritative.
+The existing v1 Text/File request framing remains unchanged. Screen sharing is a negotiated extension so old peers continue to interoperate for v1 features. Discovery capability fields are only hints; the TLS-authenticated Hello is authoritative. Normal builds still advertise only Text/File/Clipboard until a real platform capture or decode backend registers screen capabilities.
 
 ## Video transport
 
@@ -79,15 +80,21 @@ The initial codec preference is:
 2. VP9 when the source encoder and viewer decoder both advertise it
 3. AV1 when compatible hardware support is available in both required directions
 
-A `ScreenOffer` contains a UUID session ID, a safe LocalMesh resource path such as `screen/display/display-0`, the selected codec, width, height, target FPS, and requested optional features. Video payloads must not be packed into the existing 96 KiB CBOR control frames. Instead, screen video uses a dedicated QUIC stream. Each encoded access unit is preceded by a compact `ScreenFrameHeader` containing sequence number, monotonic timestamp, keyframe flag and payload length.
+A `ScreenOffer` contains a UUID session ID, a safe LocalMesh resource path such as `screen/display/display-0`, the selected codec, width, height, target FPS, and requested optional features. The receiver must explicitly accept the offer before the source can open video. Pending offers expire after 60 seconds.
 
-The receiver enforces negotiated maximum resolution, frame rate and encoded-frame limits before allocation. Decoders must reject unreasonable dimensions, backwards frame sequence/timestamps and integer-overflowing lengths.
+Video payloads are not packed into the existing 96 KiB CBOR control frames. After acceptance, the source opens a dedicated ordered QUIC unidirectional stream. The stream begins with a CBOR `ScreenStreamInit` that must exactly match the accepted offer. Encoded access units then use a fixed 21-byte header: 8-byte sequence, 8-byte monotonic microsecond timestamp, 1-byte keyframe flag and 4-byte payload length, all integer fields big-endian.
 
-### Stream reliability policy
+The encoded payload is limited to 16 MiB and validated before allocation. Frame sequence must strictly increase and timestamps must not move backwards. The QUIC transport allows at most eight concurrent unidirectional streams per connection.
 
-For the first implementation LoCAL should use a dedicated unidirectional QUIC stream for encoded video because it is simple, encrypted and ordered. The sender should favor freshness over preserving an ever-growing encoder queue: if capture or encode falls behind, drop frames before they enter QUIC.
+The receiver keeps a four-frame queue. If decoding/rendering falls behind, the oldest queued encoded frame is dropped before the queue can grow further. This intentionally favors freshness over accumulating seconds of latency. A later implementation can make this GOP/keyframe-aware once real encoders are connected.
 
-A later low-latency mode may use QUIC DATAGRAM for independently decodable chunks or short-GOP frame groups, but this should only be introduced with explicit loss recovery and keyframe-request behavior.
+### Session control
+
+Stop and keyframe-request messages use authenticated bidirectional control streams. Session IDs are UUIDs and are bound to the authenticated peer that created the session. A peer cannot stop, signal or attach video to another peer's session.
+
+The core bounds screen state to eight active/pending sessions and fifty visible session records. Disconnecting a peer, revoking the connection or shutting down LoCAL closes relevant pending/active state and wakes local consumers.
+
+Remote pointer/keyboard events are deliberately not included in this phase. `screen.control` currently participates in capability/offer negotiation only; actual input transport and OS injection remain Phase S4.
 
 ## Capture backends
 
@@ -127,19 +134,20 @@ Control messages use normalized coordinates rather than sender pixels so differe
 
 ## Audio
 
-System audio is negotiated separately from video. A source must advertise `screen.audio` plus `system_audio_capture`; a viewer must advertise `screen.audio` plus `system_audio_playback`. It should use Opus at 48 kHz over its own logical transport and timestamps tied to the same monotonic session clock as video. Microphone forwarding is a different resource and must not be enabled implicitly with screen audio.
+System audio is negotiated separately from video. A source must advertise `screen.audio` plus `system_audio_capture`; a viewer must advertise `screen.audio` plus `system_audio_playback`. The later audio transport should use Opus at 48 kHz over its own logical transport and timestamps tied to the same monotonic session clock as video. Microphone forwarding is a different resource and must not be enabled implicitly with screen audio.
 
 ## Security requirements
 
 - screen sharing requires an already paired TLS-authenticated peer
-- incoming offers require explicit acceptance unless the user creates a narrowly scoped remembered permission
+- incoming offers require explicit acceptance unless a future narrowly scoped remembered permission is deliberately added
 - share, view, system audio and control roles are independently advertised and authorized
-- capture state must be visibly indicated on the source device
-- closing the local capture indicator terminates the remote stream
+- session IDs are bound to the authenticated peer and accepted profile
+- capture state must be visibly indicated on the source device once a real capture backend exists
+- closing the local capture indicator must terminate the remote stream
 - no Internet rendezvous or cloud relay is implied by this design
 - resource URIs are identifiers, not authorization tokens
 - frame lengths, dimensions, FPS and codec metadata are validated before allocation or decode
-- control events are data messages, never operating-system shell strings
+- control events will be data messages, never operating-system shell strings
 
 ## Implementation sequence
 
@@ -159,13 +167,15 @@ System audio is negotiated separately from video. A source must advertise `scree
 - encoded access-unit size/order validation
 - platform backend/session interfaces that keep raw GPU surfaces outside `local-core`
 
-### Phase S0.75 — session control
+### Phase S0.75 — session control ✅
 
 - screen offer / accept / reject / stop messages
 - dedicated video-stream initialization frame
+- fixed bounded encoded-frame transport
 - keyframe request control message
 - strict session ownership and pairing checks
-- bounded pending/active session state
+- bounded pending/active session state and freshness-oriented receive queue
+- real two-peer QUIC integration tests for accept, video, keyframe, stop and rejection
 
 ### Phase S1 — desktop view-only prototype
 

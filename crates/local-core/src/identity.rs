@@ -84,7 +84,9 @@ impl Identity {
         ));
         let mut transport = quinn::TransportConfig::default();
         transport.max_concurrent_bidi_streams(16u32.into());
-        transport.max_concurrent_uni_streams(0u32.into());
+        // Video uses dedicated unidirectional streams. Keep this bounded so a
+        // paired peer cannot consume unbounded stream state.
+        transport.max_concurrent_uni_streams(8u32.into());
         transport.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
         transport.max_idle_timeout(Some(std::time::Duration::from_secs(30).try_into()?));
         let transport = Arc::new(transport);
