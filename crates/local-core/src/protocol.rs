@@ -36,7 +36,10 @@ impl Hello {
     /// Those peers are known to implement the original Text/File/Clipboard MVP.
     pub fn effective_capabilities(&self) -> Vec<String> {
         if self.version == VERSION && self.capabilities.is_empty() {
-            BASE_CAPABILITIES.iter().map(|value| (*value).to_owned()).collect()
+            BASE_CAPABILITIES
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect()
         } else {
             self.capabilities.clone()
         }
@@ -222,7 +225,9 @@ pub fn valid_capability(value: &str) -> bool {
     value.split('.').all(|segment| {
         !segment.is_empty()
             && segment.len() <= 32
-            && segment.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+            && segment
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
     })
 }
 
@@ -336,7 +341,10 @@ mod tests {
         let id = "c".repeat(64);
         let json = format!(r#"{{"version":1,"id":"{id}","name":"Old peer","port":53319}}"#);
         let hello: Hello = serde_json::from_str(&json).unwrap();
-        assert_eq!(hello.effective_capabilities(), vec!["text", "file", "clipboard"]);
+        assert_eq!(
+            hello.effective_capabilities(),
+            vec!["text", "file", "clipboard"]
+        );
         assert!(hello.screen.is_none());
     }
 
