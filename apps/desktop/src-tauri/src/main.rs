@@ -12,7 +12,10 @@ use local_screen::{
 };
 use serde_json::{json, Value};
 use std::{
-    sync::{mpsc, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 use tauri::{Manager, State};
@@ -67,9 +70,11 @@ impl ScreenRuntime {
         #[cfg(not(target_os = "windows"))]
         let backend: Option<Arc<dyn EncodedCaptureBackend>> = None;
 
-        if let Some(backend) = &backend {
-            let _ = node.set_screen_capabilities(Some(source_capabilities(backend.as_ref())));
-        }
+        let backend = backend.and_then(|backend| {
+            node.set_screen_capabilities(Some(source_capabilities(backend.as_ref())))
+                .ok()
+                .map(|_| backend)
+        });
         Self { backend }
     }
 
@@ -154,16 +159,28 @@ impl ScreenRuntime {
             }));
         }
 
-        let sender = node
-            .open_screen_video(&id)
-            .await
-            .map_err(|error| error.to_string())?;
-        let signals = node
-            .subscribe_screen_signals(&id)
-            .map_err(|error| error.to_string())?;
-        let capture = backend
-            .start(&source.id, &profile)
-            .map_err(|error| error.to_string())?;
+        let signals = match node.subscribe_screen_signals(&id) {
+            Ok(signals) => signals,
+            Err(error) => {
+                let _ = node.stop_screen(&id).await;
+                return Err(error.to_string());
+            }
+        };
+        let mut capture = match backend.start(&source.id, &profile) {
+            Ok(capture) => capture,
+            Err(error) => {
+                let _ = node.stop_screen(&id).await;
+                return Err(error.to_string());
+            }
+        };
+        let sender = match node.open_screen_video(&id).await {
+            Ok(sender) => sender,
+            Err(error) => {
+                let _ = capture.stop();
+                let _ = node.stop_screen(&id).await;
+                return Err(error.to_string());
+            }
+        };
         spawn_screen_pipeline(node, id.clone(), sender, signals, capture);
 
         Ok(json!({
@@ -174,27 +191,34 @@ impl ScreenRuntime {
     }
 }
 
+struct CaptureControl {
+    stop: AtomicBool,
+    keyframe: AtomicBool,
+}
+
+impl CaptureControl {
+    fn new() -> Self {
+        Self {
+            stop: AtomicBool::new(false),
+            keyframe: AtomicBool::new(false),
+        }
+    }
+}
+
 fn run_capture_loop(
     mut capture: Box<dyn EncodedCaptureSession>,
-    control_rx: mpsc::Receiver<ScreenSignal>,
-    latest_tx: watch::Sender<Option<EncodedVideoFrame>>,
+    control: Arc<CaptureControl>,
+    latest_tx: watch::Sender<Option<Arc<EncodedVideoFrame>>>,
 ) -> Result<(), String> {
     loop {
-        loop {
-            match control_rx.try_recv() {
-                Ok(ScreenSignal::Stop) => {
-                    capture.stop().map_err(|error| error.to_string())?;
-                    return Ok(());
-                }
-                Ok(ScreenSignal::RequestKeyframe) => capture
-                    .request_keyframe()
-                    .map_err(|error| error.to_string())?,
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    let _ = capture.stop();
-                    return Ok(());
-                }
-            }
+        if control.stop.load(Ordering::Acquire) {
+            capture.stop().map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+        if control.keyframe.swap(false, Ordering::AcqRel) {
+            capture
+                .request_keyframe()
+                .map_err(|error| error.to_string())?;
         }
 
         match capture
@@ -202,7 +226,7 @@ fn run_capture_loop(
             .map_err(|error| error.to_string())?
         {
             CapturePoll::Frame(frame) => {
-                latest_tx.send_replace(Some(frame));
+                latest_tx.send_replace(Some(Arc::new(frame)));
             }
             CapturePoll::Pending => {}
             CapturePoll::Ended => {
@@ -220,10 +244,11 @@ fn spawn_screen_pipeline(
     mut signals: broadcast::Receiver<ScreenSignal>,
     capture: Box<dyn EncodedCaptureSession>,
 ) {
-    let (latest_tx, mut latest_rx) = watch::channel::<Option<EncodedVideoFrame>>(None);
-    let (control_tx, control_rx) = mpsc::channel::<ScreenSignal>();
+    let (latest_tx, mut latest_rx) = watch::channel::<Option<Arc<EncodedVideoFrame>>>(None);
+    let control = Arc::new(CaptureControl::new());
+    let capture_control = control.clone();
     let mut capture_task =
-        tokio::task::spawn_blocking(move || run_capture_loop(capture, control_rx, latest_tx));
+        tokio::task::spawn_blocking(move || run_capture_loop(capture, capture_control, latest_tx));
 
     tokio::spawn(async move {
         let mut remote_stopped = false;
@@ -237,13 +262,11 @@ fn spawn_screen_pipeline(
                     match signal {
                         Ok(ScreenSignal::Stop) => {
                             remote_stopped = true;
-                            let _ = control_tx.send(ScreenSignal::Stop);
+                            control.stop.store(true, Ordering::Release);
                             break;
                         }
                         Ok(ScreenSignal::RequestKeyframe) => {
-                            if control_tx.send(ScreenSignal::RequestKeyframe).is_err() {
-                                break;
-                            }
+                            control.keyframe.store(true, Ordering::Release);
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => {}
                         Err(broadcast::error::RecvError::Closed) => break,
@@ -268,7 +291,7 @@ fn spawn_screen_pipeline(
             }
         }
 
-        let _ = control_tx.send(ScreenSignal::Stop);
+        control.stop.store(true, Ordering::Release);
         let _ = sender.finish();
         if !remote_stopped {
             let _ = node.stop_screen(&id).await;
