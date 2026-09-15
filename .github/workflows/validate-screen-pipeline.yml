@@ -1,0 +1,56 @@
+name: Validate screen pipeline
+on:
+  push:
+    branches: [sol/screen-capture-quic-pipeline]
+    paths: [.github/workflows/validate-screen-pipeline.yml]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Normalize pipeline source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('apps/desktop/src-tauri/src/main.rs')
+          text = path.read_text()
+          text = text.replace(
+              'negotiate, CapturePoll, CaptureSource, EncodedCaptureBackend, EncodedCaptureSession,\n    EncodedVideoFrame, ScreenRequest,',
+              'negotiate, CapturePoll, EncodedCaptureBackend, EncodedCaptureSession, EncodedVideoFrame,\n    ScreenRequest,',
+              1,
+          )
+          old = '''                capture_result = &mut capture_task => {\n                    if capture_result.is_err() || capture_result.is_ok_and(|result| result.is_err()) {\n                        break;\n                    }\n                    break;\n                }\n'''
+          new = '''                capture_result = &mut capture_task => {\n                    let _ = capture_result;\n                    break;\n                }\n'''
+          if text.count(old) != 1:
+              raise SystemExit('capture task select branch not found exactly once')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cargo fmt --all
+          cargo generate-lockfile
+      - name: Check desktop pipeline
+        shell: pwsh
+        run: cargo check -p local-desktop
+      - name: Run core and screen tests
+        shell: pwsh
+        run: cargo test -p local-core -p local-screen
+      - name: Clippy
+        shell: pwsh
+        run: cargo clippy -p local-core -p local-screen -p local-desktop -- -D warnings
+      - name: Commit formatting and lockfile
+        shell: bash
+        run: |
+          git config user.name 'LoCAL CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add Cargo.lock apps/desktop/src-tauri/src/main.rs crates/local-core/src/lib.rs crates/local-screen/src/lib.rs crates/local-screen/src/windows.rs
+          if ! git diff --cached --quiet; then
+            git commit -m 'Validate desktop screen capture pipeline'
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
