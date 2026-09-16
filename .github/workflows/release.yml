@@ -21,8 +21,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked -p local-core -p local-cli
-      - run: cargo clippy --locked -p local-core -p local-cli -p local-android -- -D warnings
+      - run: cargo test --locked -p local-core -p local-cli -p local-screen
+      - run: cargo clippy --locked -p local-core -p local-cli -p local-android -p local-screen -- -D warnings
       - run: cargo fmt --all -- --check
       - uses: actions/setup-node@v4
         with:
@@ -95,7 +95,7 @@ jobs:
         run: cargo build --locked --release -p local-cli --target ${{ matrix.target }}
       - name: Test native file operations and QUIC sessions
         if: matrix.platform != 'windows-arm64'
-        run: cargo test --locked -p local-core -p local-cli --target ${{ matrix.target }}
+        run: cargo test --locked -p local-core -p local-cli -p local-screen --target ${{ matrix.target }}
       - name: Install desktop build tooling
         working-directory: apps/desktop
         run: npm ci
@@ -134,6 +134,8 @@ jobs:
           key: android
       - name: Install Android SDK and NDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install pinned Android platform and native toolchain
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'

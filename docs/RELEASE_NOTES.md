@@ -8,7 +8,8 @@ LoCALの最初の実用プレビューです。同じLANのAndroid・Windows・L
 
 **Pixel 7aなどは `android-arm64-v8a-debug.apk`、一般的なWindows PCは `windows-x64-setup.exe` を選んでください。** Android受信ファイルは「端末に保存…」で書き出せます。
 
+画面共有のプロトコル、承認・停止、映像転送、Windowsキャプチャの基盤を含みます。受信映像の表示は実装中のため、この版では画面共有を利用できません。
+
 初期APKは開発署名、Windows/macOSは商用署名・公証なしです。異なる署名のAPKへの更新では再インストールが必要になる場合があります。先に受信ファイルを書き出してください。音声、センサー、QR、画像クリップボード、フォルダー直接送信は未対応です。
 
 `SHA256SUMS.txt` と、ソースコミット・配布物一覧を記載した `manifest.json` を添付します。詳細はリポジトリの `docs/QUICKSTART.md` を参照してください。
-
