@@ -66,7 +66,7 @@ impl Store {
         Ok(())
     }
     pub fn messages(&self) -> Result<Vec<Message>> {
-        let mut stmt = self.0.prepare("SELECT id,peer_id,direction,channel,text,timestamp FROM (SELECT * FROM messages ORDER BY timestamp DESC,rowid DESC LIMIT 200) ORDER BY timestamp ASC")?;
+        let mut stmt = self.0.prepare("SELECT id,peer_id,direction,channel,text,timestamp FROM (SELECT rowid AS sequence,* FROM messages ORDER BY timestamp DESC,rowid DESC LIMIT 200) ORDER BY timestamp ASC,sequence ASC")?;
         let rows = stmt.query_map([], |r| {
             Ok(Message {
                 id: r.get(0)?,
@@ -94,5 +94,37 @@ impl Store {
     pub fn clear_history(&self) -> Result<()> {
         self.0.execute("DELETE FROM messages", [])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn messages_with_equal_timestamps_keep_insertion_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        for index in 0..205 {
+            store
+                .insert_message(&Message {
+                    id: format!("message-{index}"),
+                    peer_id: "peer".into(),
+                    direction: "in".into(),
+                    channel: "mesh.text".into(),
+                    text: index.to_string(),
+                    timestamp: 1000,
+                })
+                .unwrap();
+        }
+        let messages = store.messages().unwrap();
+        assert_eq!(messages.len(), 200);
+        assert_eq!(
+            messages
+                .iter()
+                .map(|message| message.text.parse::<u32>().unwrap())
+                .collect::<Vec<_>>(),
+            (5..205).collect::<Vec<_>>()
+        );
     }
 }
