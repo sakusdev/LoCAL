@@ -13,6 +13,10 @@ let messageSignature = '';
 const pending = new Map();
 const renderCache = new Map();
 const busy = new Set();
+let receivedFiles = [];
+let receivedOffset = 0;
+let receivedSignature = null;
+let receivedLoading = false;
 
 window.localResolve = (id, raw) => {
   const handler = pending.get(id);
@@ -81,6 +85,7 @@ function tab(name) {
   document.querySelectorAll('[data-tab]').forEach((button) => { button.classList.toggle('active', button.dataset.tab === name); button.setAttribute('aria-current', button.dataset.tab === name ? 'page' : 'false'); });
   $('page-name').textContent = labels[name];
   render();
+  if (name === 'transfers') refreshReceived(true);
 }
 
 function size(bytes) {
@@ -133,6 +138,39 @@ function renderTransfers() {
     if (['failed','cancelled'].includes(transfer.status) && transfer.direction === 'out') controls += button('再送する','retry',transfer.id);
     return `<article class="transfer"><div class="transfer-header"><div><h3>${escapeHtml(transfer.name)}</h3><div class="transfer-meta">${transfer.direction === 'in' ? '↓ 受信' : '↑ 送信'} · ${escapeHtml(peerName(transfer.peer_id))} · ${size(transfer.bytes)} / ${size(transfer.size)}</div></div><span class="transfer-status ${transfer.status === 'failed' ? 'failed' : ''}">${statuses[transfer.status] || escapeHtml(transfer.status)}</span></div>${active ? `<progress value="${transfer.bytes}" max="${transfer.size || 1}" aria-label="転送の進行状況"></progress>` : ''}${transfer.error ? `<p class="error-text">${escapeHtml(transfer.error)}</p>` : ''}${controls ? `<div class="actions">${controls}</div>` : ''}</article>`;
   }).join('') : empty('まだ転送はありません', '「近くの端末」から相手を選んで、最初のファイルを送ってみましょう。'));
+  refreshReceived();
+}
+
+async function exportReceived(file) {
+  if (android) {
+    const result = await command({op:'export_file',path:file.path,name:file.name});
+    if (result) toast('ファイルを保存しました');
+  } else {
+    await command({op:'write_clipboard',text:file.path});
+    toast('保存先をコピーしました。ファイルマネージャーで開けます。');
+  }
+}
+
+async function refreshReceived(force = false) {
+  if (receivedLoading || (!android && !desktop)) return;
+  const signature = snapshot?.transfers.filter(t => t.direction === 'in' && t.path).map(t => `${t.id}:${t.status}`).join(',') || '';
+  if (!force && signature === receivedSignature) return;
+  receivedLoading = true;
+  $('received-prev').disabled = true;
+  $('received-next').disabled = true;
+  try {
+    const result = await command({op:'received_files',offset:receivedOffset});
+    receivedFiles = result.files;
+    receivedOffset = result.offset;
+    receivedSignature = signature;
+    setHtml('received-files', receivedFiles.length ? receivedFiles.map((file, index) => `<article class="transfer"><h3>${escapeHtml(file.name)}</h3><div class="transfer-meta">${size(file.size)} · ${new Date(file.timestamp).toLocaleString('ja-JP')}</div><div class="actions">${button(android ? '端末に保存…' : '保存先をコピー','export-received',String(index),'primary')}</div></article>`).join('') : empty('保存済みのファイルはありません','受信が完了したファイルをここに表示します。'));
+    $('received-page').textContent = result.total ? `${receivedOffset + 1}–${receivedOffset + receivedFiles.length} / ${result.total} 件` : '0 件';
+    $('received-prev').disabled = receivedOffset === 0;
+    $('received-next').disabled = receivedOffset + receivedFiles.length >= result.total;
+  } catch (error) {
+    receivedSignature = signature;
+    toast(String(error.message || error),true);
+  } finally { receivedLoading = false; }
 }
 
 function renderMessages() {
@@ -199,6 +237,7 @@ document.addEventListener('click', (event) => {
     target.disabled = true;
     try {
       switch (op) {
+        case 'export-received': { const file = receivedFiles[Number(id)]; if (file) await exportReceived(file); break; }
         case 'connect': await command({op:'connect',peer_id:id,address:peer.address}); break;
         case 'pair': await command({op:'confirm',peer_id:id,code:peer.code}); toast('確認しました。相手側でも確認してください。'); break;
         case 'disconnect': await command({op:'disconnect',peer_id:id}); break;
@@ -208,8 +247,7 @@ document.addEventListener('click', (event) => {
         case 'cancel': await command({op:'cancel_transfer',id}); break;
         case 'retry': await command({op:'send_file',peer_id:transfer.peer_id,path:transfer.path}); break;
         case 'export':
-          if (android) { const result = await command({op:'export_file',path:transfer.path,name:transfer.name}); if (result) toast('ファイルを保存しました'); }
-          else { await command({op:'write_clipboard',text:transfer.path}); toast('保存先をコピーしました。ファイルマネージャーで開けます。'); }
+          await exportReceived(transfer);
           break;
         case 'copy-message': { const message = snapshot.messages.find((m) => m.id === id); if (message) { await command({op:'write_clipboard',text:message.text}); toast('コピーしました'); } break; }
       }
@@ -218,6 +256,9 @@ document.addEventListener('click', (event) => {
 });
 
 $('manual-open').onclick = () => { $('manual-dialog').showModal(); $('manual-address').focus(); };
+$('received-refresh').onclick = () => refreshReceived(true);
+$('received-prev').onclick = () => { receivedOffset = Math.max(0,receivedOffset - 50); refreshReceived(true); };
+$('received-next').onclick = () => { receivedOffset += 50; refreshReceived(true); };
 $('manual-form').onsubmit = (event) => {
   event.preventDefault();
   action('manual-connect', async () => {

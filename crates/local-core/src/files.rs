@@ -15,6 +15,14 @@ use tokio::{
     sync::oneshot,
 };
 
+#[derive(serde::Serialize)]
+struct ReceivedFile {
+    name: String,
+    path: String,
+    size: u64,
+    timestamp: u128,
+}
+
 async fn hash_file(path: &Path) -> Result<(String, u64)> {
     let mut file = tokio::fs::File::open(path).await?;
     hash_open_file(&mut file).await
@@ -47,6 +55,59 @@ async fn hash_open_file(file: &mut tokio::fs::File) -> Result<(String, u64)> {
 }
 
 impl Node {
+    pub(crate) async fn received_files(&self, offset: usize) -> Result<serde_json::Value> {
+        let directory = self.receive_dir.clone();
+        tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
+            let directory = std::fs::canonicalize(directory)?;
+            let mut files = Vec::new();
+            for entry in std::fs::read_dir(directory)? {
+                let entry = entry?;
+                // Never expose partial downloads, subdirectories or symbolic links.
+                if !entry.file_type()?.is_file() {
+                    continue;
+                }
+                let filename = entry.file_name().to_string_lossy().into_owned();
+                if filename.starts_with('.') {
+                    continue;
+                }
+                let metadata = match entry.metadata() {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error.into()),
+                };
+                let name = filename
+                    .split_once('_')
+                    .map_or(filename.as_str(), |(id, name)| {
+                        if uuid::Uuid::parse_str(id).is_ok() {
+                            name
+                        } else {
+                            &filename
+                        }
+                    });
+                files.push(ReceivedFile {
+                    name: name.into(),
+                    path: entry.path().to_string_lossy().into_owned(),
+                    size: metadata.len(),
+                    timestamp: metadata
+                        .modified()
+                        .ok()
+                        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or(0, |duration| duration.as_millis()),
+                });
+            }
+            files.sort_by(|a, b| {
+                b.timestamp
+                    .cmp(&a.timestamp)
+                    .then_with(|| a.path.cmp(&b.path))
+            });
+            let total = files.len();
+            let offset = offset.min(total.saturating_sub(1) / 50 * 50);
+            let files: Vec<_> = files.into_iter().skip(offset).take(50).collect();
+            Ok(serde_json::json!({"files":files,"total":total,"offset":offset,"limit":50}))
+        })
+        .await?
+    }
+
     fn begin_transfer(&self, transfer: Transfer) -> Result<Arc<Cancel>> {
         let mut cancellations = self.cancellations.lock().unwrap();
         if cancellations.len() >= 8 || cancellations.contains_key(&transfer.id) {

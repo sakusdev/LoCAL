@@ -5,6 +5,7 @@ LoCALの最初の実用プレビューです。同じLANのAndroid・Windows・L
 - QUIC / TLS 1.3のテキスト・ファイル送受信
 - 受信承認、進行状況、キャンセル、再送で中断再開、BLAKE3検証
 - SQLite履歴、手動クリップボード共有、日本語UI、CLI
+- 再起動後も開ける保存済み受信ファイル一覧
 
 **Pixel 7aなどは `android-arm64-v8a-debug.apk`、一般的なWindows PCは `windows-x64-setup.exe` を選んでください。** Android受信ファイルは「端末に保存…」で書き出せます。
 

@@ -652,6 +652,13 @@ impl Node {
         };
         match field("op")? {
             "snapshot" => self.snapshot(),
+            "received_files" => {
+                self.received_files(
+                    usize::try_from(value.get("offset").and_then(Value::as_u64).unwrap_or(0))
+                        .unwrap_or(usize::MAX),
+                )
+                .await
+            }
             "connect" => Ok(json!({
                 "id":self.connect(field("address")?,value.get("peer_id").and_then(Value::as_str)).await?
             })),

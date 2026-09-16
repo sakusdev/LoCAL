@@ -36,6 +36,10 @@
       <div class="page-heading"><div class="eyebrow">DIRECT TO YOUR DEVICE.</div><h1>ファイル転送</h1><p>受信を確認してから保存。送信中の状態も、ここで。</p></div>
       <div id="transfers"></div>
       <p class="muted small">中断したファイルは、同じ相手に同じファイルを選び直すと続きから転送します。</p>
+      <div class="section-title"><h2>保存済みの受信ファイル</h2><button id="received-refresh" class="secondary">一覧を更新</button></div>
+      <p class="muted small">アプリを再起動しても、ここから受信ファイルを取り出せます。</p>
+      <div id="received-files"></div>
+      <div class="actions"><button id="received-prev" class="secondary" disabled>前へ</button><span id="received-page" class="muted small" role="status"></span><button id="received-next" class="secondary" disabled>次へ</button></div>
     </section>
     <section id="view-history" class="view" hidden>
       <div class="page-heading"><div class="eyebrow">WORDS, WITHOUT THE CLOUD.</div><h1>メッセージ</h1><p>端末同士のちいさな会話。履歴はこの端末に保存します。</p></div>
@@ -56,4 +60,3 @@
   <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>
-

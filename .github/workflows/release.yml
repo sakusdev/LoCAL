@@ -132,6 +132,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: android
+          cache-on-failure: true
       - name: Install Android SDK and NDK
         uses: android-actions/setup-android@v3
         with:

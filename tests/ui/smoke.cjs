@@ -26,17 +26,20 @@ const server = http.createServer((req,res) => {
         const id='a'.repeat(64), peer='b'.repeat(64);
         const state={version:'0.1.0',device:{id,name:'My PC',port:53319,addresses:['192.168.1.10:53319']},peers:[{id:peer,name:'Pixel 7a',address:'192.168.1.20:53319',connected:true,trusted:false,ready:false,code:'483291',local_confirmed:false}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/test/received'};
         let clipboard='clipboard test';window.testCalls=[];
+        const received=[];
+        window.testRestart=()=>{state.transfers=[];};
         window.LocalNative={invoke(callId,body){
           const request=JSON.parse(body);window.testCalls.push(request);
           let data={};
           switch(request.op){
             case 'snapshot':data=state;break;
+            case 'received_files':data={files:received,total:received.length,offset:0,limit:50};break;
             case 'confirm':state.peers[0].ready=true;state.peers[0].trusted=true;state.peers[0].code=null;state.trusted=[{id:peer,name:'Pixel 7a'}];break;
             case 'send_text':state.messages.push({id:String(state.messages.length),peer_id:peer,direction:'out',channel:request.channel,text:request.text,timestamp:Date.now()});break;
             case 'read_clipboard':data=clipboard;break;
             case 'write_clipboard':clipboard=request.text;break;
             case 'set_name':state.device.name=request.name;break;
-            case 'pick_file':state.transfers.unshift({id:'file1',peer_id:peer,name:'photo.png',size:12345,bytes:12345,direction:'in',status:'completed',error:'',path:'/test/received/photo.png',timestamp:Date.now()});data={id:'file1'};break;
+            case 'pick_file':state.transfers.unshift({id:'file1',peer_id:peer,name:'photo.png',size:12345,bytes:12345,direction:'in',status:'completed',error:'',path:'/test/received/photo.png',timestamp:Date.now()});received.push({name:'photo.png',path:'/test/received/photo.png',size:12345,timestamp:Date.now()});data={id:'file1'};break;
             case 'export_file':data=true;break;
             case 'clear_history':state.messages=[];break;
             case 'forget':state.trusted=[];state.peers=[];break;
@@ -64,9 +67,14 @@ const server = http.createServer((req,res) => {
       await page.screenshot({path:`screenshots/messages-${viewport.width}.png`,fullPage:true});
       await page.locator('[data-tab="nearby"]').click();
       await page.getByRole('button',{name:'ファイルを送る ↗',exact:true}).click();
-      await page.getByRole('heading',{name:'photo.png',exact:true}).waitFor();
-      await page.getByRole('button',{name:'端末に保存…',exact:true}).click();
+      await page.locator('#transfers').getByRole('heading',{name:'photo.png',exact:true}).waitFor();
+      await page.locator('#transfers').getByRole('button',{name:'端末に保存…',exact:true}).click();
       await page.getByText('ファイルを保存しました',{exact:true}).waitFor();
+      await page.evaluate(()=>window.testRestart());
+      await page.locator('#transfers').getByText('まだ転送はありません',{exact:true}).waitFor();
+      await page.locator('#received-files').getByRole('heading',{name:'photo.png',exact:true}).waitFor();
+      await page.locator('#received-files').getByRole('button',{name:'端末に保存…',exact:true}).click();
+      await page.waitForFunction(()=>window.testCalls.filter(c=>c.op==='export_file').length===2);
       await page.screenshot({path:`screenshots/transfers-${viewport.width}.png`,fullPage:true});
       await page.locator('[data-tab="settings"]').click();
       await page.getByLabel('端末の名前',{exact:true}).fill('Test Phone');
@@ -75,8 +83,7 @@ const server = http.createServer((req,res) => {
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
       assert.deepEqual(errors,[]);
       await context.close();
-      console.log(`PASS ${viewport.width}px: pairing, escaped text, explicit clipboard send, file/export, settings, no overflow`);
+      console.log(`PASS ${viewport.width}px: pairing, escaped text, explicit clipboard send, file/export after restart, settings, no overflow`);
     }
   } finally {await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
-
