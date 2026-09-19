@@ -176,6 +176,9 @@ jobs:
           api-level: 35
           arch: x86_64
           profile: pixel_7
+          # The Pixel profile defaults to a 7 GiB data partition, exceeding
+          # remaining runner space after the three native Android builds.
+          disk-size: 2048M
           disable-animations: true
           script: |
             python3 tests/android-peer.py target/release/local > android-peer.log 2>&1 &
