@@ -181,11 +181,12 @@ jobs:
           disk-size: 2048M
           disable-animations: true
           script: |
-            python3 tests/android-peer.py target/release/local > android-peer.log 2>&1 &
+            python3 -u tests/android-peer.py target/release/local > android-peer.log 2>&1 &
             adb install apps/android/app/build/outputs/apk/debug/app-universal-debug.apk
             adb install apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell pm grant org.sakus.local android.permission.POST_NOTIFICATIONS
             adb shell am instrument -w org.sakus.local.test/androidx.test.runner.AndroidJUnitRunner | tee android-instrumentation.log
+            adb logcat -d -t 2000 > android-logcat.log
             grep -q 'OK (1 test)' android-instrumentation.log
             test -f android-host-passed
             adb exec-out screencap -p > android-screen.png
@@ -196,6 +197,7 @@ jobs:
           path: |
             android-instrumentation.log
             android-peer.log
+            android-logcat.log
             android-screen.png
       - name: Verify and collect APKs
         run: |
