@@ -398,12 +398,24 @@ impl Node {
         let final_path = self
             .receive_dir
             .join(format!("{}_{}", uuid::Uuid::new_v4(), name));
-        // Same filesystem, atomic no-clobber publication; never overwrite a user's file.
-        tokio::fs::hard_link(&partial, &final_path)
-            .await
-            .context("Cannot publish received file")?;
-        drop(file);
-        tokio::fs::remove_file(&partial).await?;
+        #[cfg(target_os = "android")]
+        {
+            // Android SELinux denies hard links even inside the app's private
+            // directory. A rename on the same filesystem publishes atomically.
+            drop(file);
+            tokio::fs::rename(&partial, &final_path)
+                .await
+                .context("Cannot publish received file")?;
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            // Keep the lock until the verified file is published on desktop.
+            tokio::fs::hard_link(&partial, &final_path)
+                .await
+                .context("Cannot publish received file")?;
+            drop(file);
+            tokio::fs::remove_file(&partial).await?;
+        }
         if let Some(t) = self.transfers.lock().unwrap().get_mut(id) {
             t.path = Some(final_path.to_string_lossy().into_owned());
         }
