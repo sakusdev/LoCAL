@@ -157,11 +157,16 @@ impl Node {
         }
     }
     pub fn decide_file(&self, id: &str, accept: bool) -> Result<()> {
-        self.decisions
+        let decision = self
+            .decisions
             .lock()
             .unwrap()
             .remove(id)
-            .context("This offer has expired")?
+            .context("This offer has expired")?;
+        // Hide the actionable offer before waking its receiver; snapshots may
+        // otherwise show it again and invite a duplicate acceptance.
+        self.progress(id, "preparing", 0);
+        decision
             .send(accept)
             .map_err(|_| anyhow::anyhow!("Sender disconnected"))
     }

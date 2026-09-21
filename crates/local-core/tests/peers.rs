@@ -67,6 +67,7 @@ async fn two_real_quic_peers_pair_message_file_and_revoke() {
     let incoming = until(&b, |s| s["transfers"][0]["status"] == "offered").await;
     b.decide_file(incoming["transfers"][0]["id"].as_str().unwrap(), true)
         .unwrap();
+    assert_ne!(b.snapshot().unwrap()["transfers"][0]["status"], "offered");
     let state = until(&b, |s| s["transfers"][0]["status"] == "completed").await;
     let path = state["transfers"][0]["path"].as_str().unwrap();
     assert_eq!(std::fs::read(path).unwrap(), bytes);
