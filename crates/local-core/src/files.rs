@@ -297,7 +297,9 @@ impl Node {
             size,
             bytes: 0,
             direction: "in".into(),
-            status: "offered".into(),
+            // The decision channel is installed in receive_file_inner. Do not
+            // expose an actionable offer in snapshots until it is ready.
+            status: "preparing".into(),
             error: String::new(),
             path: None,
             timestamp: now(),
@@ -322,6 +324,7 @@ impl Node {
     ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.decisions.lock().unwrap().insert(id.into(), tx);
+        self.progress(id, "offered", 0);
         let accept = tokio::select! {
             result = tokio::time::timeout(Duration::from_secs(120),rx) => result.context("File offer expired")?.context("File offer cancelled")?,
             _ = session.conn.closed() => bail!("Sender disconnected")
