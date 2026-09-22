@@ -122,7 +122,6 @@ main { min-height: 100dvh; margin-left: 218px; }
 .footnote { display: flex; gap: 8px; margin-top: 19px; color: var(--muted); font-size: 11px; }
 .footnote span { display: grid; place-items: center; flex: none; width: 16px; height: 16px; border: 1px solid var(--rule-strong); font: 11px ui-monospace, monospace; }
 .empty { padding: 36px 16px; border-bottom: 1px solid var(--rule); text-align: center; }
-.empty-symbol { display: block; color: var(--accent); font-size: 25px; line-height: 1.2; }
 .empty strong { display: block; font-size: 13px; }
 .empty p { margin: 6px 0 0; font-size: 11px; }
 .pair-box { border-left: 3px solid var(--accent); background: #e7eae2; padding: 12px 15px; margin-bottom: 10px; }

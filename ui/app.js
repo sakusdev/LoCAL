@@ -93,7 +93,7 @@ function size(bytes) {
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 3);
   return `${(bytes / 1024 ** index).toFixed(1)} ${['B','KiB','MiB','GiB'][index]}`;
 }
-const empty = (title, body) => `<div class="empty"><span class="empty-symbol">⌁</span><strong>${escapeHtml(title)}</strong><p>${escapeHtml(body)}</p></div>`;
+const empty = (title, body) => `<div class="empty"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(body)}</p></div>`;
 const button = (label, actionName, id, className = 'secondary') => `<button class="${className}" data-action="${actionName}" data-id="${escapeHtml(id)}">${escapeHtml(label)}</button>`;
 const peerName = (id) => snapshot?.peers.find((p) => p.id === id)?.name || snapshot?.trusted.find((p) => p.id === id)?.name || id.slice(0, 10);
 
@@ -137,7 +137,7 @@ function renderTransfers() {
     if (transfer.status === 'completed' && transfer.direction === 'in' && transfer.path) controls += button(android ? '端末に保存…' : '保存先をコピー','export',transfer.id,'primary');
     if (['failed','cancelled'].includes(transfer.status) && transfer.direction === 'out') controls += button('再送する','retry',transfer.id);
     return `<article class="transfer"><div class="transfer-header"><div><h3>${escapeHtml(transfer.name)}</h3><div class="transfer-meta">${transfer.direction === 'in' ? '↓ 受信' : '↑ 送信'} · ${escapeHtml(peerName(transfer.peer_id))} · ${size(transfer.bytes)} / ${size(transfer.size)}</div></div><span class="transfer-status ${transfer.status === 'failed' ? 'failed' : ''}">${statuses[transfer.status] || escapeHtml(transfer.status)}</span></div>${active ? `<progress value="${transfer.bytes}" max="${transfer.size || 1}" aria-label="転送の進行状況"></progress>` : ''}${transfer.error ? `<p class="error-text">${escapeHtml(transfer.error)}</p>` : ''}${controls ? `<div class="actions">${controls}</div>` : ''}</article>`;
-  }).join('') : empty('まだ転送はありません', '「近くの端末」から相手を選んで、最初のファイルを送ってみましょう。'));
+  }).join('') : empty('まだ転送はありません', '「近くの端末」で相手を選ぶと、ファイルを送れます。'));
   refreshReceived();
 }
 
