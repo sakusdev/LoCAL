@@ -59,7 +59,7 @@
       <div class="settings-card"><h2>この端末</h2><form id="name-form"><label for="device-name">端末の名前</label><div class="input-row"><input id="device-name" maxlength="80" placeholder="端末の名前"><button class="primary" type="submit">保存</button></div></form><label>接続用アドレス</label><div id="addresses" class="mono info-value">—</div><label>Device ID / 公開鍵の指紋</label><div id="fingerprint" class="mono fingerprint">—</div><p class="muted small">表示名が同じでも鍵が変わった端末は、もう一度ペアリングが必要です。</p></div>
       <div class="settings-card"><h2>信頼済みの端末</h2><div id="trusted"></div></div>
       <div class="settings-card"><h2>保存とプライバシー</h2><label>受信ファイルの保存先</label><div id="receive-dir" class="mono fingerprint"></div><p id="storage-note" class="muted small"></p><div class="settings-row"><span>メッセージ履歴</span><button id="clear-history" class="danger-button">履歴を削除</button></div></div>
-      <p class="muted small">LoCAL v<span id="version">0.2.1</span> · QUIC / TLS 1.3 · BLAKE3<br>音声・センサー・QRペアリングは今後のバージョンで対応予定です。</p>
+      <p class="muted small">LoCAL v<span id="version">0.2.2</span> · QUIC / TLS 1.3 · BLAKE3<br>音声・センサー・QRペアリングは今後のバージョンで対応予定です。</p>
     </section>
   </main>
   <dialog id="manual-dialog"><form id="manual-form"><div class="dialog-heading"><h2>アドレスで接続</h2><button type="button" data-close="manual-dialog" class="icon-button" aria-label="閉じる">×</button></div><p>相手のLoCALの「設定」に表示されたアドレスを入力してください。</p><label for="manual-address">IPアドレス : ポート</label><input id="manual-address" placeholder="192.168.1.20:53319" inputmode="url" required><p class="muted small">両方の端末を同じWi-Fiに接続してください。</p><button type="submit" class="primary full">接続する ↗</button></form></dialog>
