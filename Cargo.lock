@@ -2295,6 +2295,7 @@ dependencies = [
 name = "local-desktop"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "local-core",
  "local-screen",
  "serde_json",

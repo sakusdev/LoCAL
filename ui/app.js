@@ -80,7 +80,7 @@ function setHtml(id, html) {
 
 function tab(name) {
   activeTab = name;
-  const labels = { nearby:'近くの端末', transfers:'ファイル転送', history:'メッセージ', settings:'設定' };
+  const labels = { nearby:'近くの端末', transfers:'ファイル転送', history:'メッセージ', screen:'画面共有', settings:'設定' };
   document.querySelectorAll('.view').forEach((view) => { view.hidden = view.id !== `view-${name}`; });
   document.querySelectorAll('[data-tab]').forEach((button) => { button.classList.toggle('active', button.dataset.tab === name); button.setAttribute('aria-current', button.dataset.tab === name ? 'page' : 'false'); });
   $('page-name').textContent = labels[name];

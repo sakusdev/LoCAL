@@ -129,6 +129,15 @@ async fn screen_offer_video_keyframe_and_stop_use_real_quic() {
     })
     .await;
     viewer.decide_screen(&offer_id, true).unwrap();
+    assert_ne!(
+        viewer
+            .screen_sessions()
+            .iter()
+            .find(|session| session.id == offer_id)
+            .unwrap()
+            .status,
+        "offered"
+    );
     assert!(offer_task.await.unwrap());
     until(&source, |s| {
         s["screen_sessions"]

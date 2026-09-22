@@ -169,7 +169,7 @@ impl Runtime {
                 .filter(|item| {
                     matches!(
                         item.status.as_str(),
-                        "awaiting_acceptance" | "offered" | "active"
+                        "awaiting_acceptance" | "preparing" | "offered" | "deciding" | "active"
                     )
                 })
                 .count();
@@ -182,7 +182,7 @@ impl Runtime {
                     .filter(|item| {
                         !matches!(
                             item.status.as_str(),
-                            "awaiting_acceptance" | "offered" | "active"
+                            "awaiting_acceptance" | "preparing" | "offered" | "deciding" | "active"
                         )
                     })
                     .min_by_key(|item| item.timestamp)
@@ -248,7 +248,7 @@ impl Runtime {
                 state.peer_id == peer_id
                     && matches!(
                         state.status.as_str(),
-                        "awaiting_acceptance" | "offered" | "active"
+                        "awaiting_acceptance" | "preparing" | "offered" | "deciding" | "active"
                     )
             })
             .map(|state| state.id.clone())
@@ -372,12 +372,15 @@ impl Node {
         if state.direction != "in" || state.status != "offered" {
             bail!("Screen offer is no longer awaiting a decision");
         }
-        self.screen_runtime
+        let decision = self
+            .screen_runtime
             .decisions
             .lock()
             .unwrap()
             .remove(id)
-            .context("Screen offer has expired")?
+            .context("Screen offer has expired")?;
+        self.screen_runtime.set_status(id, "deciding");
+        decision
             .send(accept)
             .map_err(|_| anyhow::anyhow!("Screen source disconnected"))
     }
@@ -519,7 +522,7 @@ impl Node {
             id: offer.id.clone(),
             peer_id: session.peer.id.clone(),
             direction: "in".into(),
-            status: "offered".into(),
+            status: "preparing".into(),
             offer: offer.clone(),
             error: String::new(),
             timestamp: now(),
@@ -529,6 +532,7 @@ impl Node {
             .lock()
             .unwrap()
             .insert(offer.id.clone(), tx);
+        self.screen_runtime.set_status(&offer.id, "offered");
         let accepted = tokio::select! {
             result = tokio::time::timeout(OFFER_TIMEOUT, rx) => {
                 result.context("Screen offer expired")?.context("Screen offer cancelled")?
@@ -544,12 +548,12 @@ impl Node {
             if !session.ready() {
                 bail!("Pairing is no longer trusted");
             }
-            self.screen_runtime.set_status(&offer.id, "active");
             self.screen_runtime
                 .videos
                 .lock()
                 .unwrap()
                 .insert(offer.id.clone(), VideoQueue::new());
+            self.screen_runtime.set_status(&offer.id, "active");
         } else {
             self.screen_runtime.set_status(&offer.id, "rejected");
         }

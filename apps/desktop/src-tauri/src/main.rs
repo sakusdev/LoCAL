@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use local_core::{
-    protocol::{ScreenCapabilities, ScreenOffer, ScreenSignal},
+    protocol::{
+        ScreenCapabilities, ScreenCodec, ScreenMediaCapabilities, ScreenOffer, ScreenSignal,
+    },
     Config, Node, ScreenVideoSender,
 };
 #[cfg(target_os = "windows")]
@@ -18,7 +21,7 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use tokio::sync::{broadcast, watch};
 
 struct AppState {
@@ -28,6 +31,7 @@ struct AppState {
 
 struct ScreenRuntime {
     backend: Option<Arc<dyn EncodedCaptureBackend>>,
+    view_enabled: AtomicBool,
 }
 
 fn source_capabilities(backend: &dyn EncodedCaptureBackend) -> ScreenCapabilities {
@@ -75,7 +79,71 @@ impl ScreenRuntime {
                 .ok()
                 .map(|_| backend)
         });
-        Self { backend }
+        Self {
+            backend,
+            view_enabled: AtomicBool::new(false),
+        }
+    }
+
+    fn enable_view(&self, node: &Node) -> Result<Value, String> {
+        if !cfg!(target_os = "windows") {
+            return Err("Screen viewing is currently supported on Windows only".into());
+        }
+        if self.view_enabled.load(Ordering::Acquire) {
+            return Ok(json!({"enabled":true}));
+        }
+        let mut capabilities = self.backend.as_ref().map_or(
+            ScreenCapabilities {
+                encode: None,
+                decode: None,
+                control_target: false,
+                system_audio_capture: false,
+                system_audio_playback: false,
+            },
+            |backend| source_capabilities(backend.as_ref()),
+        );
+        capabilities.decode = Some(ScreenMediaCapabilities {
+            codecs: vec![ScreenCodec::H264],
+            max_width: 1920,
+            max_height: 1080,
+            max_fps: 30,
+        });
+        node.set_screen_capabilities(Some(capabilities))
+            .map_err(|error| error.to_string())?;
+        self.view_enabled.store(true, Ordering::Release);
+        Ok(json!({"enabled":true}))
+    }
+
+    fn watch(&self, node: Arc<Node>, app: tauri::AppHandle, id: &str) -> Result<Value, String> {
+        if !self.view_enabled.load(Ordering::Acquire) {
+            return Err("Screen decoder is not enabled".into());
+        }
+        let mut receiver = node
+            .take_screen_video_receiver(id)
+            .map_err(|error| error.to_string())?;
+        let id = id.to_owned();
+        tokio::spawn(async move {
+            while let Some(packet) = receiver.recv().await {
+                if app
+                    .emit(
+                        "local-screen-frame",
+                        json!({
+                            "id": id,
+                            "sequence": packet.header.sequence,
+                            "timestamp_us": packet.header.timestamp_us,
+                            "keyframe": packet.header.keyframe,
+                            "data": STANDARD.encode(&packet.data),
+                        }),
+                    )
+                    .is_err()
+                {
+                    let _ = node.stop_screen(&id).await;
+                    break;
+                }
+            }
+            let _ = app.emit("local-screen-ended", json!({"id":id}));
+        });
+        Ok(json!({"watching":true}))
     }
 
     fn backend(&self) -> Result<Arc<dyn EncodedCaptureBackend>, String> {
@@ -300,8 +368,21 @@ fn spawn_screen_pipeline(
 }
 
 #[tauri::command]
-async fn local_command(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+async fn local_command(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    request: Value,
+) -> Result<Value, String> {
     match request.get("op").and_then(Value::as_str) {
+        Some("enable_screen_view") => state.screen.enable_view(&state.node),
+        Some("watch_screen") => state.screen.watch(
+            state.node.clone(),
+            app,
+            request
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or("Missing screen session id")?,
+        ),
         Some("screen_sources") => state.screen.sources(),
         Some("share_screen") => state.screen.share(state.node.clone(), &request).await,
         _ => state.node.command(request).await.map_err(|e| e.to_string()),

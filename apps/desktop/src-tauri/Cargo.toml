@@ -10,6 +10,7 @@ name = "LoCAL"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.22.1"
 local-core.workspace = true
 local-screen.workspace = true
 serde_json.workspace = true
