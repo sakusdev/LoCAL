@@ -67,9 +67,20 @@ async fn two_real_quic_peers_pair_message_file_and_revoke() {
     let incoming = until(&b, |s| s["transfers"][0]["status"] == "offered").await;
     b.decide_file(incoming["transfers"][0]["id"].as_str().unwrap(), true)
         .unwrap();
+    assert_ne!(b.snapshot().unwrap()["transfers"][0]["status"], "offered");
     let state = until(&b, |s| s["transfers"][0]["status"] == "completed").await;
     let path = state["transfers"][0]["path"].as_str().unwrap();
     assert_eq!(std::fs::read(path).unwrap(), bytes);
+    let saved = b.command(json!({"op":"received_files"})).await.unwrap();
+    assert_eq!(saved["total"], 1);
+    assert_eq!(saved["files"][0]["name"], "テスト.bin");
+    assert_eq!(
+        saved["files"][0]["path"],
+        std::fs::canonicalize(path)
+            .unwrap()
+            .to_string_lossy()
+            .as_ref()
+    );
     until(&a, |s| {
         s["transfers"]
             .as_array()
@@ -261,4 +272,64 @@ async fn resumes_persisted_bytes_and_rejects_corrupt_partial() {
     }
     a.stop();
     b.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn received_files_survive_restart_with_bounded_pages() {
+    let temp = tempfile::tempdir().unwrap();
+    let node = start(temp.path(), "Receiver").await;
+    for index in 0..53 {
+        std::fs::write(
+            node.receive_dir
+                .join(format!("{}_写真-{index}.txt", uuid::Uuid::new_v4())),
+            b"saved",
+        )
+        .unwrap();
+    }
+    std::fs::create_dir(node.receive_dir.join(".partial")).unwrap();
+    std::fs::write(
+        node.receive_dir.join(".partial/incomplete.part"),
+        b"partial",
+    )
+    .unwrap();
+    std::fs::write(node.receive_dir.join(".hidden"), b"hidden").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        temp.path().join("data/identity.json"),
+        node.receive_dir.join("link.txt"),
+    )
+    .unwrap();
+    let first = node.command(json!({"op":"received_files"})).await.unwrap();
+    assert_eq!(first["total"], 53);
+    assert_eq!(first["files"].as_array().unwrap().len(), 50);
+    assert!(first["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|file| file["name"].as_str().unwrap().starts_with("写真-")));
+    let last = node
+        .command(json!({"op":"received_files","offset":50}))
+        .await
+        .unwrap();
+    assert_eq!(last["files"].as_array().unwrap().len(), 3);
+    let overflow = node
+        .command(json!({"op":"received_files","offset":u64::MAX}))
+        .await
+        .unwrap();
+    assert_eq!(overflow, last);
+    node.stop();
+    drop(node);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let node = start(temp.path(), "Receiver").await;
+    assert!(node.snapshot().unwrap()["transfers"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let restored = node.command(json!({"op":"received_files"})).await.unwrap();
+    assert_eq!(restored, first);
+    assert_eq!(
+        std::fs::read(restored["files"][0]["path"].as_str().unwrap()).unwrap(),
+        b"saved"
+    );
+    node.stop();
 }

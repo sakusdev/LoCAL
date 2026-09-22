@@ -21,8 +21,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked -p local-core -p local-cli
-      - run: cargo clippy --locked -p local-core -p local-cli -p local-android -- -D warnings
+      - run: cargo test --locked -p local-core -p local-cli -p local-screen
+      - run: cargo clippy --locked -p local-core -p local-cli -p local-android -p local-screen -- -D warnings
       - run: cargo fmt --all -- --check
       - uses: actions/setup-node@v4
         with:
@@ -95,7 +95,7 @@ jobs:
         run: cargo build --locked --release -p local-cli --target ${{ matrix.target }}
       - name: Test native file operations and QUIC sessions
         if: matrix.platform != 'windows-arm64'
-        run: cargo test --locked -p local-core -p local-cli --target ${{ matrix.target }}
+        run: cargo test --locked -p local-core -p local-cli -p local-screen --target ${{ matrix.target }}
       - name: Install desktop build tooling
         working-directory: apps/desktop
         run: npm ci
@@ -132,8 +132,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: android
+          cache-on-failure: true
       - name: Install Android SDK and NDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install pinned Android platform and native toolchain
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
@@ -173,13 +176,17 @@ jobs:
           api-level: 35
           arch: x86_64
           profile: pixel_7
+          # The Pixel profile defaults to a 7 GiB data partition, exceeding
+          # remaining runner space after the three native Android builds.
+          disk-size: 2048M
           disable-animations: true
           script: |
-            python3 tests/android-peer.py target/release/local > android-peer.log 2>&1 &
+            python3 -u tests/android-peer.py target/release/local > android-peer.log 2>&1 &
             adb install apps/android/app/build/outputs/apk/debug/app-universal-debug.apk
             adb install apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell pm grant org.sakus.local android.permission.POST_NOTIFICATIONS
             adb shell am instrument -w org.sakus.local.test/androidx.test.runner.AndroidJUnitRunner | tee android-instrumentation.log
+            adb logcat -d -t 2000 > android-logcat.log
             grep -q 'OK (1 test)' android-instrumentation.log
             test -f android-host-passed
             adb exec-out screencap -p > android-screen.png
@@ -190,6 +197,7 @@ jobs:
           path: |
             android-instrumentation.log
             android-peer.log
+            android-logcat.log
             android-screen.png
       - name: Verify and collect APKs
         run: |

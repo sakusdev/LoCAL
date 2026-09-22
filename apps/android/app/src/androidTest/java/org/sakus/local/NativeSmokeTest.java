@@ -45,7 +45,7 @@ public final class NativeSmokeTest {
             }
             SystemClock.sleep(100);
         }
-        assertTrue("Linux -> Android file must arrive with exact content",received);
+        assertTrue("Linux -> Android file must arrive with exact content: " + state().getJSONArray("transfers"),received);
         assertTrue(state().getJSONArray("messages").toString().contains("Hello Android from Linux"));
         File outgoing=new File(context.getCacheDir(),"from-android.bin");
         try(OutputStream output=new BufferedOutputStream(new FileOutputStream(outgoing))) {for(int n=0;n<2500007;n++){output.write(n%251);}}
@@ -56,6 +56,6 @@ public final class NativeSmokeTest {
             for(int j=0;j<transfers.length();j++){JSONObject t=transfers.getJSONObject(j);if(sendId.equals(t.getString("id"))&&"completed".equals(t.getString("status"))){sent=true;}}
             SystemClock.sleep(100);
         }
-        assertTrue("Android -> Linux file must be acknowledged",sent);
+        assertTrue("Android -> Linux file must be acknowledged: " + state().getJSONArray("transfers"),sent);
     }
 }
