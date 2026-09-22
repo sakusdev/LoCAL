@@ -39,9 +39,18 @@ async function command(request) {
   if (desktop) {
     const invoke = window.__TAURI__.core.invoke;
     if (request.op === 'pick_file') {
-      const path = await invoke('plugin:dialog|open', { options: { multiple: false, directory: false, title: '送信するファイルを選択' } });
-      if (!path) return null;
-      return invoke('local_command', { request: { op:'send_file', peer_id:request.peer_id, path } });
+      const selection = await invoke('plugin:dialog|open', { options: { multiple: true, directory: false, title: '送信するファイルを選択（最大8件）' } });
+      if (!selection) return null;
+      const paths = Array.isArray(selection) ? selection : [selection];
+      if (paths.length > 8) throw new Error('一度に送信できるのは8件までです。');
+      const ids = [];
+      for (const path of paths) {
+        try {
+          const result = await invoke('local_command', { request: { op:'send_file', peer_id:request.peer_id, path } });
+          ids.push(result.id);
+        } catch (error) { return { ids, error:String(error) }; }
+      }
+      return { ids };
     }
     if (request.op === 'read_clipboard') return invoke('plugin:clipboard-manager|read_text');
     if (request.op === 'write_clipboard') return invoke('plugin:clipboard-manager|write_text', { text: request.text });
@@ -192,7 +201,7 @@ function renderMessages() {
 
 function renderSettings() {
   if (document.activeElement !== $('device-name')) $('device-name').value = snapshot.device.name;
-  setHtml('addresses', snapshot.device.addresses.length ? snapshot.device.addresses.map(escapeHtml).join('<br>') : 'LANに接続してください');
+  setHtml('addresses', snapshot.device.addresses.length ? snapshot.device.addresses.map((address) => `<div class="address-row"><span class="mono">${escapeHtml(address)}</span>${button('コピー','copy-address',address)}</div>`).join('') : 'LANに接続してください');
   $('fingerprint').textContent = snapshot.device.id;
   $('receive-dir').textContent = snapshot.receive_dir;
   $('storage-note').textContent = android ? '受信ファイルはアプリ内に保存されます。転送画面の「端末に保存…」から任意のフォルダーへ書き出してください。アプリを削除する前に必要なファイルを書き出してください。' : '受信したファイルはこのフォルダーへ保存します。既存のファイルは上書きしません。';
@@ -232,6 +241,7 @@ document.addEventListener('click', (event) => {
   const peer = snapshot.peers.find((p) => p.id === id);
   const transfer = snapshot.transfers.find((t) => t.id === id);
   if (op === 'chat') { chosenPeer = id; return tab('history'); }
+  if (op === 'copy-address' && !snapshot.device.addresses.includes(id)) return;
   if (op === 'forget') return confirmAction('端末の信頼を解除', '接続を切断し、次回は再びコードの確認を求めます。', async () => { await command({op:'forget',peer_id:id}); toast('信頼を解除しました'); });
   action(`${op}-${id}`, async () => {
     target.disabled = true;
@@ -241,7 +251,7 @@ document.addEventListener('click', (event) => {
         case 'connect': await command({op:'connect',peer_id:id,address:peer.address}); break;
         case 'pair': await command({op:'confirm',peer_id:id,code:peer.code}); toast('確認しました。相手側でも確認してください。'); break;
         case 'disconnect': await command({op:'disconnect',peer_id:id}); break;
-        case 'file': { const result = await command({op:'pick_file',peer_id:id}); if (result) { tab('transfers'); toast('ファイルを準備しています'); } break; }
+        case 'file': { const result = await command({op:'pick_file',peer_id:id}); if (result?.ids?.length) { tab('transfers'); toast(`${result.ids.length}件のファイルを準備しています`); } if (result?.error) throw new Error(`${result.ids.length}件を受け付けました。残りは送信できませんでした: ${result.error}`); break; }
         case 'accept': await command({op:'accept_file',id,accept:true}); break;
         case 'reject': await command({op:'accept_file',id,accept:false}); break;
         case 'cancel': await command({op:'cancel_transfer',id}); break;
@@ -250,6 +260,7 @@ document.addEventListener('click', (event) => {
           await exportReceived(transfer);
           break;
         case 'copy-message': { const message = snapshot.messages.find((m) => m.id === id); if (message) { await command({op:'write_clipboard',text:message.text}); toast('コピーしました'); } break; }
+        case 'copy-address': await command({op:'write_clipboard',text:id}); toast('接続用アドレスをコピーしました'); break;
       }
     } finally { target.disabled = false; }
   });

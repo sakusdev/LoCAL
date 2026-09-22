@@ -24,7 +24,7 @@ const server = http.createServer((req,res) => {
       const errors=[];page.on('pageerror',e=>errors.push(e.message));
       await page.addInitScript(() => {
         const id='a'.repeat(64), peer='b'.repeat(64);
-        const state={version:'0.2.2',device:{id,name:'My PC',port:53319,addresses:['192.168.1.10:53319']},peers:[{id:peer,name:'Pixel 7a',address:'192.168.1.20:53319',connected:true,trusted:false,ready:false,code:'483291',local_confirmed:false}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/test/received'};
+        const state={version:'0.2.3',device:{id,name:'My PC',port:53319,addresses:['192.168.1.10:53319']},peers:[{id:peer,name:'Pixel 7a',address:'192.168.1.20:53319',connected:true,trusted:false,ready:false,code:'483291',local_confirmed:false}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/test/received'};
         let clipboard='clipboard test';window.testCalls=[];
         const received=[];
         window.testRestart=()=>{state.transfers=[];};
@@ -39,7 +39,7 @@ const server = http.createServer((req,res) => {
             case 'read_clipboard':data=clipboard;break;
             case 'write_clipboard':clipboard=request.text;break;
             case 'set_name':state.device.name=request.name;break;
-            case 'pick_file':state.transfers.unshift({id:'file1',peer_id:peer,name:'photo.png',size:12345,bytes:12345,direction:'in',status:'completed',error:'',path:'/test/received/photo.png',timestamp:Date.now()});received.push({name:'photo.png',path:'/test/received/photo.png',size:12345,timestamp:Date.now()});data={id:'file1'};break;
+            case 'pick_file':state.transfers.unshift({id:'file1',peer_id:peer,name:'photo.png',size:12345,bytes:12345,direction:'in',status:'completed',error:'',path:'/test/received/photo.png',timestamp:Date.now()});received.push({name:'photo.png',path:'/test/received/photo.png',size:12345,timestamp:Date.now()});data={ids:['file1','file2']};break;
             case 'export_file':data=true;break;
             case 'clear_history':state.messages=[];break;
             case 'forget':state.trusted=[];state.peers=[];break;
@@ -67,6 +67,7 @@ const server = http.createServer((req,res) => {
       await page.screenshot({path:`screenshots/messages-${viewport.width}.png`,fullPage:true});
       await page.locator('[data-tab="nearby"]').click();
       await page.getByRole('button',{name:'ファイルを送る ↗',exact:true}).click();
+      await page.getByText('2件のファイルを準備しています',{exact:true}).waitFor();
       await page.locator('#transfers').getByRole('heading',{name:'photo.png',exact:true}).waitFor();
       await page.locator('#transfers').getByRole('button',{name:'端末に保存…',exact:true}).click();
       await page.getByText('ファイルを保存しました',{exact:true}).waitFor();
@@ -80,10 +81,46 @@ const server = http.createServer((req,res) => {
       await page.getByLabel('端末の名前',{exact:true}).fill('Test Phone');
       await page.getByRole('button',{name:'保存',exact:true}).click();
       await page.getByText('端末名を保存しました',{exact:true}).waitFor();
+      await page.locator('#addresses').getByRole('button',{name:'コピー',exact:true}).click();
+      await page.getByText('接続用アドレスをコピーしました',{exact:true}).waitFor();
+      assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.op==='write_clipboard').at(-1).text),'192.168.1.10:53319');
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
       assert.deepEqual(errors,[]);
       await context.close();
       console.log(`PASS ${viewport.width}px: pairing, escaped text, explicit clipboard send, file/export after restart, settings, no overflow`);
     }
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      const peer = 'b'.repeat(64);
+      const state = {version:'0.2.3',device:{id:'a'.repeat(64),name:'Desktop',port:53319,addresses:['192.168.1.10:53319']},peers:[{id:peer,name:'Phone',address:'192.168.1.20:53319',connected:true,trusted:true,ready:true}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/test/received'};
+      window.testCalls = [];
+      window.testPaths = ['/tmp/a.txt','/tmp/b.txt'];
+      window.__TAURI__ = {core:{invoke:async (command,args) => {
+        window.testCalls.push({command,args});
+        if (command === 'plugin:dialog|open') return window.testPaths;
+        if (command === 'local_command' && args.request.op === 'snapshot') return state;
+        if (command === 'local_command' && args.request.op === 'received_files') return {files:[],total:0,offset:0,limit:50};
+        if (command === 'local_command' && args.request.op === 'send_file') {
+          const id = `file${state.transfers.length}`;
+          state.transfers.unshift({id,peer_id:peer,name:args.request.path.split('/').at(-1),size:12,bytes:0,direction:'out',status:'hashing',error:'',path:args.request.path,timestamp:Date.now()});
+          return {id};
+        }
+        return null;
+      }}};
+    });
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.getByText('● ペアリング済み · 暗号化接続').waitFor();
+    await page.getByRole('button',{name:'ファイルを送る ↗',exact:true}).click();
+    await page.locator('#transfers').getByRole('heading',{name:'a.txt'}).waitFor();
+    await page.locator('#transfers').getByRole('heading',{name:'b.txt'}).waitFor();
+    assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.args?.request?.op==='send_file').length),2);
+    await page.evaluate(()=>{window.testPaths = Array.from({length:9},(_,i)=>`/tmp/${i}.txt`);});
+    await page.locator('[data-tab="nearby"]').click();
+    await page.getByRole('button',{name:'ファイルを送る ↗',exact:true}).click();
+    await page.getByText('一度に送信できるのは8件までです。',{exact:true}).waitFor();
+    assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.args?.request?.op==='send_file').length),2);
+    await context.close();
+    console.log('PASS desktop: multi-file selection sends each file, rejects more than eight');
   } finally {await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
