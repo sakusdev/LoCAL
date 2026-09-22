@@ -127,7 +127,9 @@ impl ScreenRuntime {
             let mut last_sequence: Option<u64> = None;
             let mut last_request: Option<Instant> = None;
             while let Some(packet) = receiver.recv().await {
-                if last_sequence.is_some_and(|last| packet.header.sequence != last.saturating_add(1)) {
+                if last_sequence
+                    .is_some_and(|last| packet.header.sequence != last.saturating_add(1))
+                {
                     waiting_for_keyframe = true;
                 }
                 last_sequence = Some(packet.header.sequence);
