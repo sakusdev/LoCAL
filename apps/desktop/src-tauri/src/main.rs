@@ -19,7 +19,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager, State};
 use tokio::sync::{broadcast, watch};
@@ -123,7 +123,23 @@ impl ScreenRuntime {
             .map_err(|error| error.to_string())?;
         let id = id.to_owned();
         tokio::spawn(async move {
+            let mut waiting_for_keyframe = true;
+            let mut last_sequence: Option<u64> = None;
+            let mut last_request: Option<Instant> = None;
             while let Some(packet) = receiver.recv().await {
+                if last_sequence.is_some_and(|last| packet.header.sequence != last.saturating_add(1)) {
+                    waiting_for_keyframe = true;
+                }
+                last_sequence = Some(packet.header.sequence);
+                if packet.header.keyframe {
+                    waiting_for_keyframe = false;
+                } else if waiting_for_keyframe {
+                    if last_request.is_none_or(|time| time.elapsed() >= Duration::from_secs(1)) {
+                        let _ = node.request_screen_keyframe(&id).await;
+                        last_request = Some(Instant::now());
+                    }
+                    continue;
+                }
                 if app
                     .emit(
                         "local-screen-frame",

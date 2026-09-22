@@ -12,7 +12,7 @@ Rust core · QUIC / TLS 1.3 · Android · Windows · Linux · macOS · CLI
 
 Pixel 7aは **Android arm64-v8a APK**、一般的なPCは **Windows x64 setup.exe** を選んでください。
 
-| 機能 | v0.1 |
+| 機能 | v0.2 |
 | --- | --- |
 | 自動発見 / IP接続 | IPv4 UDP Broadcast + 補助Multicast |
 | 鍵 / ペアリング | Ed25519 + TLS exporterの6桁コード、両側確認 |
@@ -21,14 +21,15 @@ Pixel 7aは **Android arm64-v8a APK**、一般的なPCは **Windows x64 setup.ex
 | クリップボード | 手動のテキスト共有 |
 | Android | JNIコア、ファイル選択・書き出し、接続通知 |
 | GUI / CLI | 日本語UI、PC/スマホ、CLI対話モード + JSON IPC |
+| 画面共有プレビュー | Windows同士の閲覧専用H.264、受信側の承認・停止 |
 
 ## 次の段階
 
 LoCALは単なるLAN内ファイル共有ではなく、端末がローカル機能を安全に公開できる **Local Connectivity & Access Layer** を目指します。将来のリソースは `lm://<device-id>/<resource>` で表現し、たとえば `screen/main`、`audio/output`、`sensors/gyro` のように扱います。
 
-次の主要機能はCapability negotiation、QRペアリング、画面共有、音声、センサー、mDNS / IPv6です。画面共有は閲覧・システム音声・リモート操作を別権限に分離し、最初はLAN内の閲覧専用セッションから実装します。マルチホップと画像クリップボードはその後の段階です。
+Windows同士の閲覧専用画面共有をプレビューとして実装しています。受信側のWebView2がH.264 Annex Bを復号できるときに使用でき、送信側の画面は受信側の承認後に取得します。Windows実機2台での画質・遅延検証は今後の課題です。続いてQRペアリング、音声、センサー、mDNS / IPv6を実装します。画面共有のシステム音声・リモート操作は別権限とし、マルチホップと画像クリップボードはその後の段階です。
 
-初期APKは開発署名、Windows/macOSは商用コード署名なしのプレビューです。
+APKはビルドごとの開発署名付き、Windows/macOSは商用コード署名なしのプレビューです。APKの更新には再インストールが必要です。
 
 - [使い方とトラブルシューティング](docs/QUICKSTART.md)
 - [ビルド・Actions・Android署名](docs/BUILDING.md)

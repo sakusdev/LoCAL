@@ -200,12 +200,18 @@ jobs:
             android-logcat.log
             android-screen.png
       - name: Verify and collect APKs
+        env:
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
         run: |
           mkdir -p dist
+          version="${RELEASE_TAG#v}"
           for apk in apps/android/app/build/outputs/apk/$ANDROID_SIGNING/*.apk; do
-            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$apk"
+            certificates=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk")
+            if [ "$ANDROID_SIGNING" = debug ]; then
+              grep -q 'CN=Android Debug' <<< "$certificates"
+            fi
             name=$(basename "$apk")
-            cp "$apk" "dist/LoCAL-0.1.0-android-${name#app-}"
+            cp "$apk" "dist/LoCAL-${version}-android-${name#app-}"
           done
           python3 - <<'PY'
           import pathlib,zipfile

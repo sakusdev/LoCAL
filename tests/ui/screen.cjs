@@ -24,7 +24,7 @@ const server = http.createServer((req,res) => {
       const offers={};
       offers[incoming]={id:incoming,peer_id:peer,direction:'in',status:'offered',error:'',
         offer:{id:incoming,resource:'screen/display/display-1',codec:'h264',width:640,height:360,fps:15}};
-      const state={version:'0.1.0',device:{id:local,name:'My PC',port:53319,addresses:[],
+      const state={version:'0.2.0',device:{id:local,name:'My PC',port:53319,addresses:[],
         screen:{decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}},
         peers:[{id:peer,name:'<img src=x onerror=alert(1)> peer',address:'10.1.1.2:53319',
           ready:true,screen:{decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}}],

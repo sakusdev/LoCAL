@@ -4,7 +4,7 @@ default-members = ["crates/local-core", "crates/local-cli", "crates/local-screen
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/sakusdev/LoCAL"
@@ -21,4 +21,3 @@ local-screen = { path = "crates/local-screen" }
 lto = "thin"
 strip = true
 codegen-units = 1
-
