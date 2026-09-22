@@ -15,11 +15,13 @@ GitHub Releasesから端末に合うファイルを選びます。
 | Mac Apple Silicon | `macos-arm64.dmg` |
 | Mac Intel | `macos-x64.dmg` |
 
-実際のファイル名には `LoCAL-0.1.0-` が付きます。署名鍵を設定したAndroidビルドでは末尾が `release.apk` になります。
+実際のファイル名には `LoCAL-0.2.0-` が付きます。署名鍵を設定したAndroidビルドでは末尾が `release.apk` になります。
 
 Android 8以降、Windows 10/11（WebView2）、Linux x64はUbuntu 22.04以降、Linux ARM64はUbuntu 24.04相当、macOS 11以降を対象としています。WindowsセットアップはWebView2がなければダウンロードします。アプリ本体のLAN通信はインターネット不要です。
 
-初期APKは開発署名です。異なる開発署名のAPKへ更新すると再インストールが必要になる場合があるため、Androidの受信ファイルは先に書き出してください。Windows / macOSは商用コード署名・公証をしていません。
+Windows同士で画面を見せるには、両方をペアリング後、送り側の「画面共有」で画面と相手を選び「共有を申し込む」を押します。受け側で「画面を見る」を承認し、画面セッションの「表示する」を押します。WebView2に対応するH.264デコーダーが必要です。閲覧専用で、音声・遠隔操作はありません。終了するときは「表示を終了」を押します。この機能はプレビューで、Windows実機2台での描画・遅延確認は未実施です。
+
+APKはActionsで生成した開発署名付きです。ビルドごとに開発鍵が変わるため、v0.1.0のAPKからの更新にも再インストールが必要です。Androidの受信ファイルは先に書き出してください。Windows / macOSは商用コード署名・公証をしていません。
 
 AppImageは実行権限を付けて起動します。FUSEがない環境では `.deb` または `--appimage-extract-and-run` を使えます。GUIに必要なWebKit/GTK等がないサーバーはCLI版を選んでください。
 

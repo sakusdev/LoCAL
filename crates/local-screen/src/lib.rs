@@ -9,6 +9,7 @@ use local_core::protocol::{
     ScreenCapabilities, ScreenCodec, ScreenFrameHeader, ScreenMediaCapabilities,
 };
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
@@ -195,6 +196,13 @@ impl EncodedVideoFrame {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CapturePoll {
+    Frame(EncodedVideoFrame),
+    Pending,
+    Ended,
+}
+
 #[derive(Debug, Default)]
 pub struct FrameValidator {
     last_sequence: Option<u64>,
@@ -245,6 +253,15 @@ pub trait EncodedCaptureSession: Send {
     fn profile(&self) -> &NegotiatedScreen;
     /// Returns the next encoded access unit, or `None` when capture ended.
     fn next_frame(&mut self) -> Result<Option<EncodedVideoFrame>>;
+    /// Polls for a frame while giving orchestration code a bounded opportunity
+    /// to process stop/keyframe signals. Backends should override this when
+    /// their native capture queue supports a timeout.
+    fn poll_frame(&mut self, _timeout: Duration) -> Result<CapturePoll> {
+        Ok(match self.next_frame()? {
+            Some(frame) => CapturePoll::Frame(frame),
+            None => CapturePoll::Ended,
+        })
+    }
     /// Requests an intra frame so a receiver can recover after loss or startup.
     fn request_keyframe(&self) -> Result<()> {
         bail!("Capture backend does not support keyframe requests")

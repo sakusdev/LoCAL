@@ -35,7 +35,7 @@ Actions installs a pinned Gradle version rather than downloading an unpinned wra
 
 CI tests real QUIC endpoints, Clippy and rustfmt on every main push / PR. Release runs manually or when `release.json` changes. Increment `revision` to rebuild a corrected candidate. Validation gates all six desktop rows and Android; publication waits for EVERY platform. Only publish has contents-write permission. It creates a draft, uploads packages/checksums/manifest, then publishes. It refuses to replace a release from a different commit; rerunning the same commit is supported.
 
-New versions: update Cargo workspace, Tauri config, desktop package/lock, Android version, packaging script and `release.json.tag`. v0.1.0 is marked prerelease.
+New versions: update Cargo workspace, Tauri config, desktop package/lock, Android version, packaging script and `release.json.tag`. v0.2.0 is marked prerelease.
 
 ## Android production signing
 
@@ -46,5 +46,4 @@ New versions: update Cargo workspace, Tauri config, desktop package/lock, Androi
 | `ANDROID_KEY_ALIAS` | Signing key alias |
 | `ANDROID_KEY_PASSWORD` | Key password |
 
-With all four configured, Actions produces signed `release.apk`; otherwise clearly named installable `debug.apk`. Keep an offline backup of the production key. Changing signing keys requires reinstalling and does not migrate app-private data automatically.
-
+With all four configured, Actions produces signed `release.apk`; otherwise clearly named installable, Android Debug signed `debug.apk`. Actions verifies the signature and certificate before publishing. CI-generated debug keys change between runs; reinstalling does not migrate app-private data automatically. Keep an offline backup of any production key.

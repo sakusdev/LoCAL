@@ -24,7 +24,7 @@ const server = http.createServer((req,res) => {
       const errors=[];page.on('pageerror',e=>errors.push(e.message));
       await page.addInitScript(() => {
         const id='a'.repeat(64), peer='b'.repeat(64);
-        const state={version:'0.1.0',device:{id,name:'My PC',port:53319,addresses:['192.168.1.10:53319']},peers:[{id:peer,name:'Pixel 7a',address:'192.168.1.20:53319',connected:true,trusted:false,ready:false,code:'483291',local_confirmed:false}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/test/received'};
+        const state={version:'0.2.0',device:{id,name:'My PC',port:53319,addresses:['192.168.1.10:53319']},peers:[{id:peer,name:'Pixel 7a',address:'192.168.1.20:53319',connected:true,trusted:false,ready:false,code:'483291',local_confirmed:false}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/test/received'};
         let clipboard='clipboard test';window.testCalls=[];
         const received=[];
         window.testRestart=()=>{state.transfers=[];};

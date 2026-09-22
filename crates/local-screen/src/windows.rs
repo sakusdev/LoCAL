@@ -1,5 +1,5 @@
 use crate::{
-    CaptureSource, CaptureSourceKind, EncodedCaptureBackend, EncodedCaptureSession,
+    CapturePoll, CaptureSource, CaptureSourceKind, EncodedCaptureBackend, EncodedCaptureSession,
     EncodedVideoFrame, NegotiatedScreen, MAX_ENCODED_FRAME,
 };
 use anyhow::{bail, Context, Result};
@@ -10,7 +10,7 @@ use openh264::{
     Timestamp,
 };
 use std::{
-    sync::mpsc::{self, Receiver, SyncSender, TrySendError},
+    sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError},
     time::{Duration, Instant},
 };
 use windows_capture::{
@@ -333,6 +333,14 @@ impl EncodedCaptureSession for WindowsCaptureSession {
             Ok(frame) => Ok(Some(frame)),
             Err(_) => Ok(None),
         }
+    }
+
+    fn poll_frame(&mut self, timeout: Duration) -> Result<CapturePoll> {
+        Ok(match self.rx.recv_timeout(timeout) {
+            Ok(frame) => CapturePoll::Frame(frame),
+            Err(RecvTimeoutError::Timeout) => CapturePoll::Pending,
+            Err(RecvTimeoutError::Disconnected) => CapturePoll::Ended,
+        })
     }
 
     fn request_keyframe(&self) -> Result<()> {

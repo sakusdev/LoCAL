@@ -512,6 +512,17 @@ impl Node {
             .cloned()
             .context("Device is disconnected. Connect again")
     }
+    pub fn peer_screen_capabilities(&self, id: &str) -> Result<protocol::ScreenCapabilities> {
+        let session = self.session(id)?;
+        if !session.ready() {
+            bail!("Confirm pairing on both devices first");
+        }
+        session
+            .peer
+            .screen
+            .clone()
+            .context("Peer does not advertise screen capabilities")
+    }
     async fn send_confirmation(&self, s: Arc<Session>) -> Result<()> {
         let (mut send, mut recv) = s.conn.open_bi().await?;
         protocol::write(&mut send, &Request::Confirm).await?;
