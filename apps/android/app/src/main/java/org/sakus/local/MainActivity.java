@@ -8,8 +8,10 @@ import android.os.*;
 import android.provider.OpenableColumns;
 import android.webkit.*;
 import android.widget.Toast;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.*;
+import java.util.ArrayList;
 import java.util.UUID;
 
 public final class MainActivity extends Activity {
@@ -25,7 +27,7 @@ public final class MainActivity extends Activity {
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 103);
         }
         web = new WebView(this);
-        web.setBackgroundColor(0xff090d12);
+        web.setBackgroundColor(0xfff1eee6);
         web.getSettings().setJavaScriptEnabled(true);
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setAllowFileAccess(false);
@@ -66,7 +68,7 @@ public final class MainActivity extends Activity {
                         runOnUiThread(() -> {
                             if (pickerId != null) { fail(id, "ファイル選択中です"); return; }
                             pickerId = id; pickerPeer = request.optString("peer_id");
-                            startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE), PICK);
+                            startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), PICK);
                         });
                     } else if ("export_file".equals(op)) {
                         File source = new File(request.getString("path")).getCanonicalFile();
@@ -96,20 +98,37 @@ public final class MainActivity extends Activity {
         if (request == PICK) {
             String id = pickerId, peer = pickerPeer; pickerId = null; pickerPeer = null;
             if (id == null) { return; }
-            if (result != RESULT_OK || data == null || data.getData() == null) { success(id, JSONObject.NULL); return; }
-            Uri uri = data.getData();
+            if (result != RESULT_OK || data == null) { success(id, JSONObject.NULL); return; }
+            ArrayList<Uri> uris = new ArrayList<>();
+            if (data.getClipData() != null) {
+                ClipData clips = data.getClipData();
+                if (clips.getItemCount() > 8) { fail(id, "一度に送信できるのは8件までです。"); return; }
+                for (int i = 0; i < clips.getItemCount(); i++) { uris.add(clips.getItemAt(i).getUri()); }
+            } else if (data.getData() != null) { uris.add(data.getData()); }
+            if (uris.isEmpty()) { success(id, JSONObject.NULL); return; }
             MeshService.WORK.execute(() -> {
+                JSONArray ids = new JSONArray();
                 try {
-                    String name = "shared-file";
-                    try (Cursor cursor = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) { if (cursor != null && cursor.moveToFirst()) { name = cursor.getString(0); } }
-                    if (name == null || name.isEmpty()) { name = "shared-file"; }
-                    name = name.replaceAll("[<>:\"/\\\\|?*\\p{Cntrl}]", "_");
-                    File directory = new File(getCacheDir(), "outgoing-" + UUID.randomUUID());
-                    if (!directory.mkdirs()) { throw new IOException("Cannot create outgoing cache"); }
-                    File file = new File(directory, name);
-                    try (InputStream input = getContentResolver().openInputStream(uri); OutputStream output = new FileOutputStream(file)) { copy(input, output, 20L * 1024 * 1024 * 1024); }
-                    reply(id, Native.command(new JSONObject().put("op", "send_file").put("peer_id", peer).put("path", file.getAbsolutePath()).toString()));
-                } catch (Throwable e) { fail(id, e.toString()); }
+                    for (Uri uri : uris) {
+                        String name = "shared-file";
+                        try (Cursor cursor = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) { if (cursor != null && cursor.moveToFirst()) { name = cursor.getString(0); } }
+                        if (name == null || name.isEmpty()) { name = "shared-file"; }
+                        name = name.replaceAll("[<>:\"/\\\\|?*\\p{Cntrl}]", "_");
+                        File directory = new File(getCacheDir(), "outgoing-" + UUID.randomUUID());
+                        if (!directory.mkdirs()) { throw new IOException("Cannot create outgoing cache"); }
+                        File file = new File(directory, name);
+                        try {
+                            try (InputStream input = getContentResolver().openInputStream(uri); OutputStream output = new FileOutputStream(file)) { copy(input, output, 20L * 1024 * 1024 * 1024); }
+                            JSONObject response = new JSONObject(Native.command(new JSONObject().put("op", "send_file").put("peer_id", peer).put("path", file.getAbsolutePath()).toString()));
+                            if (!response.optBoolean("ok")) { throw new IOException(response.optString("error", "Cannot send file")); }
+                            ids.put(response.getJSONObject("data").getString("id"));
+                        } catch (Throwable e) { file.delete(); directory.delete(); throw e; }
+                    }
+                    success(id, new JSONObject().put("ids", ids));
+                } catch (Throwable e) {
+                    if (ids.length() == 0) { fail(id, e.getMessage() == null ? e.toString() : e.getMessage()); }
+                    else { try { success(id, new JSONObject().put("ids", ids).put("error", e.getMessage() == null ? e.toString() : e.getMessage())); } catch (Exception ignored) {} }
+                }
             });
         } else if (request == EXPORT) {
             String id = exportId; File source = exportSource; exportId = null; exportSource = null;
@@ -129,4 +148,3 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onDestroy() { if (web != null) { web.removeJavascriptInterface("LocalNative"); web.destroy(); web = null; } super.onDestroy(); }
 }
-

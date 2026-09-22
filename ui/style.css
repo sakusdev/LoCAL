@@ -137,6 +137,9 @@ textarea { min-height: 90px; resize: vertical; }
 .input-row { display: flex; gap: 8px; }
 .input-row input { flex: 1; }
 .info-value { color: var(--ink); font-size: 12px; line-height: 1.85; overflow-wrap: anywhere; }
+.address-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; }
+.address-row .mono { min-width: 0; overflow-wrap: anywhere; }
+.address-row .secondary { flex: none; }
 .fingerprint { padding: 10px; border: 1px solid var(--rule); background: #e8e9e1; color: var(--ink-soft); font-size: 10px; overflow-wrap: anywhere; }
 .settings-row, .trusted-peer { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
 .settings-row { margin-top: 15px; font-size: 12px; }
