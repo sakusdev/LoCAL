@@ -12,7 +12,7 @@ Rust core · QUIC / TLS 1.3 · Android · Windows · Linux · macOS · CLI
 
 Pixel 7aは **Android arm64-v8a APK**、一般的なPCは **Windows x64 setup.exe** を選んでください。
 
-| 機能 | v0.2.1 |
+| 機能 | v0.2.2 |
 | --- | --- |
 | 自動発見 / IP接続 | IPv4 UDP Broadcast + 補助Multicast |
 | 鍵 / ペアリング | Ed25519 + TLS exporterの6桁コード、両側確認 |
