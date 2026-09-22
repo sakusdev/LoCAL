@@ -123,7 +123,7 @@ function renderPeers() {
     } else if (peer.connected && peer.code) {
       controls = `<div class="pair-box"><p>相手の画面と同じコードですか？</p><div class="pair-code">${escapeHtml(peer.code)}</div>${peer.local_confirmed ? '<p>相手の確認を待っています…</p>' : button('一致しています','pair',peer.id,'primary full')}<small>相手の画面を直接確認してください。コードは2分で失効します。</small></div>${button('接続を取り消す','disconnect',peer.id)}`;
     } else controls = `<div class="peer-status">${peer.trusted ? '◇ 信頼済みの端末' : '○ 接続できます'}</div>${button(peer.trusted ? 'もう一度つなぐ ↗' : 'ペアリングする ↗','connect',peer.id,'primary full')}`;
-    return `<article class="peer-card ${peer.ready ? 'ready' : ''}"><div class="peer-heading"><div class="peer-device" aria-hidden="true">▣</div><div><h3>${escapeHtml(peer.name)}</h3><div class="mono">${escapeHtml(peer.address)}</div></div></div>${controls}</article>`;
+    return `<article class="peer-card ${peer.ready ? 'ready' : ''}"><div class="peer-heading"><div class="peer-device" aria-hidden="true">▣</div><div><h3>${escapeHtml(peer.name)}</h3><div class="mono">${escapeHtml(peer.address)}</div></div></div><div class="peer-controls">${controls}</div></article>`;
   }).join('') : empty('端末を探しています', '同じWi-Fiにつないで、もう一方の端末でもLoCALを開いてください。'));
 }
 
@@ -185,7 +185,7 @@ function renderMessages() {
   const signature = chosenPeer + messages.map((m) => m.id).join(',');
   if (signature !== messageSignature) {
     messageSignature = signature;
-    setHtml('messages', messages.length ? messages.map((m) => `<article class="message ${m.direction === 'out' ? 'out' : ''}"><div class="message-body">${escapeHtml(m.text)}</div><div class="message-footer"><span>${m.channel === 'mesh.clipboard' ? 'クリップボード · ' : ''}${new Date(m.timestamp).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>${button('コピー','copy-message',m.id,'copy-message')}</div></article>`).join('') : empty('言葉を、となりの端末へ。','メッセージとクリップボードのテキストを送れます。'));
+    setHtml('messages', messages.length ? messages.map((m) => `<article class="message ${m.direction === 'out' ? 'out' : ''}"><div class="message-body">${escapeHtml(m.text)}</div><div class="message-footer"><span>${m.channel === 'mesh.clipboard' ? 'クリップボード · ' : ''}${new Date(m.timestamp).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>${button('コピー','copy-message',m.id,'copy-message')}</div></article>`).join('') : empty('メッセージはありません','接続した端末にテキストを送信できます。'));
     $('messages').scrollTop = $('messages').scrollHeight;
   }
 }
