@@ -221,6 +221,8 @@ jobs:
               with zipfile.ZipFile(path) as z:
                   assert 'assets/index.html' in z.namelist()
                   assert 'assets/app.js' in z.namelist()
+                  assert 'assets/clipboard.js' in z.namelist()
+                  assert 'assets/screen.js' in z.namelist()
                   assert any(n.endswith('liblocal_android.so') for n in z.namelist())
           PY
       - uses: actions/upload-artifact@v4

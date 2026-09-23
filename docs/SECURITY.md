@@ -6,7 +6,7 @@ TLS proves possession of the device's Ed25519 key. Trust requires comparing the 
 
 Both confirmations are required for data channels. Discovery exposes device name, public-key ID and port to the LAN and is not authenticated. A familiar display name alone is not proof of identity. This application does not promise protection against a compromised local OS, traffic analysis or denial of service by a hostile LAN.
 
-The UI escapes untrusted text, uses a restrictive CSP and loads no external assets. Android's bridge is attached to bundled local assets; external requests and navigation are blocked. Clipboard reads/writes are user-triggered. Received files are never executed or opened automatically.
+The UI escapes untrusted text, uses a restrictive CSP and loads no external assets. Android's bridge is attached to bundled local assets; external requests and navigation are blocked. Clipboard auto-sync is disabled until the user selects peers and enables it, ignores pre-enable history, runs only while the UI is visible, and prevents received text from being echoed back. Received files are never executed or opened automatically.
 
 Audio-call signaling is accepted only from a paired peer advertising the audio capability and is encrypted by the existing QUIC/TLS session. The WebRTC audio path is protected by DTLS-SRTP and uses host candidates only; no public STUN/TURN server is configured. Microphone capture requires an explicit outgoing-call or answer action plus OS permission. A paired peer can still ring repeatedly, so revoke trust if a device is abusive.
 

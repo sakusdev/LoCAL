@@ -24,7 +24,7 @@ const server = http.createServer((req,res) => {
       const offers={};
       offers[incoming]={id:incoming,peer_id:peer,direction:'in',status:'offered',error:'',
         offer:{id:incoming,resource:'screen/display/display-1',codec:'h264',width:640,height:360,fps:15}};
-      const state={version:'0.3.0',device:{id:local,name:'My PC',port:53319,addresses:[],
+      const state={version:'0.4.0',device:{id:local,name:'My PC',port:53319,addresses:[],
         screen:{decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}},
         peers:[{id:peer,name:'<img src=x onerror=alert(1)> peer',address:'10.1.1.2:53319',
           ready:true,screen:{decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}}],
@@ -84,7 +84,7 @@ const server = http.createServer((req,res) => {
     const androidErrors=[];androidPage.on('pageerror',error=>androidErrors.push(error.message));
     await androidPage.addInitScript(() => {
       const peer='b'.repeat(64),local='a'.repeat(64),id='52c26a8a-25d8-4751-802e-57e8bfe92732';
-      const state={version:'0.3.0',device:{id:local,name:'Phone',port:53319,addresses:[]},peers:[{id:peer,name:'Windows PC',address:'10.1.1.2:53319',ready:true,screen:{encode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/tmp',screen_sessions:[{id,peer_id:peer,direction:'in',status:'active',error:'',offer:{id,resource:'screen/display/display-1',codec:'h264',width:640,height:360,fps:15}}]};
+      const state={version:'0.4.0',device:{id:local,name:'Phone',port:53319,addresses:[]},peers:[{id:peer,name:'Windows PC',address:'10.1.1.2:53319',ready:true,screen:{encode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30},decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/tmp',screen_sessions:[{id,peer_id:peer,direction:'in',status:'active',error:'',offer:{id,resource:'screen/display/display-1',codec:'h264',width:640,height:360,fps:15}}]};
       window.androidDecoded=[];let polled=false;
       class MockVideoDecoder {
         static async isConfigSupported(){return {supported:true};}
@@ -100,6 +100,8 @@ const server = http.createServer((req,res) => {
         if(request.op==='snapshot') data=state;
         else if(request.op==='received_files') data={files:[],total:0,offset:0,limit:50};
         else if(request.op==='enable_screen_view') data={enabled:true};
+        else if(request.op==='screen_sources') data={sources:[{id:'display-0',name:'このAndroid画面',width:1080,height:2400}]};
+        else if(request.op==='share_screen') data={id:'android-out',accepted:true,profile:{width:324,height:720,fps:15}};
         else if(request.op==='watch_screen') data={watching:true};
         else if(request.op==='poll_screen_frame') {data=polled?{ended:true,frame:null}:{frame:{sequence:1,timestamp_us:77,keyframe:true,data:btoa('android-frame')}};polled=true;}
         else if(request.op==='audio_signals') data={events:[],latest:0};
@@ -112,9 +114,11 @@ const server = http.createServer((req,res) => {
     await androidPage.getByRole('button',{name:'表示する',exact:true}).click();
     await androidPage.waitForFunction(()=>window.androidDecoded.length===1);
     assert.equal(await androidPage.evaluate(()=>window.androidDecoded[0].timestamp),77);
-    assert.equal(await androidPage.locator('#screen-share-panel').isHidden(),true);
+    assert.equal(await androidPage.locator('#screen-share-panel').isVisible(),true);
+    await androidPage.getByRole('button',{name:'共有を申し込む',exact:true}).click();
+    await androidPage.waitForFunction(()=>window.LocalNative && document.getElementById('toast').textContent.includes('共有しています'));
     assert.deepEqual(androidErrors,[]);
     await androidPage.close();
-    console.log('PASS Android screen: WebCodecs capability, native frame polling, H.264 decode and viewer-only UI');
+    console.log('PASS Android screen: H.264 receive plus MediaProjection share request UI');
   } finally {await browser.close();server.close();}
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});

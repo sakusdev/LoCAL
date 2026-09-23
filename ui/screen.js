@@ -2,7 +2,8 @@
 
 (() => {
   const windowsSource = desktop && navigator.userAgent.includes('Windows');
-  if (!windowsSource && !android) return;
+  const localSource = windowsSource || android;
+  if (!desktop && !android) return;
 
   let supported = false;
   let sources = [];
@@ -73,13 +74,13 @@
         s.offer.width + '×' + s.offer.height + '</p>' +
         (s.error ? '<p class="error-text">' + escapeHtml(s.error) + '</p>' : '') +
         '<div class="actions">' + actions + '</div></article>';
-    }).join('') : empty('画面共有はありません','ペアリング済みのWindows端末と画面を共有できます。'));
+    }).join('') : empty('画面共有はありません','対応するペアリング済み端末と画面を共有できます。'));
     if (viewerId && !sessions.some((s) => s.id === viewerId && s.status === 'active')) closeViewer();
   }
 
   async function refreshSources() {
     if (!supported || loadingSources) return;
-    if (!windowsSource) {
+    if (!localSource) {
       sources = [];
       $('screen-share-panel').hidden = true;
       return;
@@ -92,7 +93,7 @@
       ).join('') || '<option value="">このPCでは画面を共有できません</option>');
     } catch {
       sources = [];
-      setHtml('screen-source','<option value="">このPCでは画面を共有できません</option>');
+      setHtml('screen-source','<option value="">この端末では画面を共有できません</option>');
     } finally {
       loadingSources = false;
       renderScreen();
@@ -150,7 +151,7 @@
     try {
       const result = await command({op:'share_screen',peer_id:$('screen-peer').value,
         source_id:$('screen-source').value,max_width:1280,max_height:720,max_fps:15});
-      toast(result.accepted ? '画面を共有しています' : '相手が画面共有を辞退しました');
+      toast(result.accepted ? '画面を共有しています' : (result.cancelled ? '画面共有をキャンセルしました' : '相手が画面共有を辞退しました'));
     } finally { $('screen-share').disabled = false; }
   });
   $('screen-stop').onclick = () => action('screen-stop',async () => {

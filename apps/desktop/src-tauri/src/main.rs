@@ -86,9 +86,6 @@ impl ScreenRuntime {
     }
 
     fn enable_view(&self, node: &Node) -> Result<Value, String> {
-        if !cfg!(target_os = "windows") {
-            return Err("Screen viewing is currently supported on Windows only".into());
-        }
         if self.view_enabled.load(Ordering::Acquire) {
             return Ok(json!({"enabled":true}));
         }

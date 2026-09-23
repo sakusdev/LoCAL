@@ -25,6 +25,11 @@ public final class NativeSmokeTest {
             SystemClock.sleep(100);
         }
         assertTrue("Native Android engine must start",ready);
+        JSONObject media = call(new JSONObject().put("op", "enable_screen_view"));
+        assertTrue("Android must advertise MediaProjection sharing", media.getBoolean("sharing"));
+        JSONObject screen = state().getJSONObject("device").getJSONObject("screen");
+        assertEquals("h264", screen.getJSONObject("encode").getJSONArray("codecs").getString(0));
+        assertEquals("h264", screen.getJSONObject("decode").getJSONArray("codecs").getString(0));
         String peerId = call(new JSONObject().put("op","connect").put("address","10.0.2.2:53319")).getString("id");
         String code = state().getJSONArray("peers").getJSONObject(0).getString("code");
         assertEquals(6,code.length());

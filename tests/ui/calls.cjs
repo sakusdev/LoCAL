@@ -21,7 +21,7 @@ const server = http.createServer((req,res) => {
     const errors=[]; page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(() => {
       const local='a'.repeat(64),peer='b'.repeat(64);
-      const state={version:'0.3.0',device:{id:local,name:'PC',port:53319,addresses:['192.168.1.10:53319']},peers:[{id:peer,name:'Phone',address:'192.168.1.20:53319',connected:true,trusted:true,ready:true,capabilities:['text','file','clipboard','audio']}],trusted:[],messages:[],transfers:[],screen_sessions:[],warnings:[],receive_dir:'/tmp'};
+      const state={version:'0.4.0',device:{id:local,name:'PC',port:53319,addresses:['192.168.1.10:53319']},peers:[{id:peer,name:'Phone',address:'192.168.1.20:53319',connected:true,trusted:true,ready:true,capabilities:['text','file','clipboard','audio']}],trusted:[],messages:[],transfers:[],screen_sessions:[],warnings:[],receive_dir:'/tmp'};
       let sequence=0; const incoming=[]; window.sentSignals=[]; window.testTracks=[]; window.testPcs=[];
       const description=(type,sdp)=>({type,sdp,toJSON(){return {type,sdp};}});
       class FakePeerConnection {

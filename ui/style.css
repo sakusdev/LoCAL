@@ -110,7 +110,7 @@ main { min-height: 100dvh; margin-left: 218px; }
 .pair-box small { display: block; margin-top: 8px; color: var(--muted); font-size: 10px; }
 
 .transfer { border-top: 1px solid var(--rule); padding: 16px 1px 18px; }
-#transfers, #received-files, #screen-sessions { border-bottom: 1px solid var(--rule); }
+#transfers, #received-files, #screen-sessions, #clipboard-events { border-bottom: 1px solid var(--rule); }
 .transfer-header { display: flex; justify-content: space-between; gap: 16px; }
 .transfer h3 { font-size: 14px; margin: 0 0 4px; overflow-wrap: anywhere; }
 .transfer-meta { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
@@ -159,6 +159,16 @@ dialog p { font-size: 12px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 #screen-canvas { display: block; width: 100%; height: auto; max-height: 70vh; object-fit: contain; background: #17211f; border: 1px solid var(--rule); }
 #screen-viewer { overflow: hidden; }
+.clipboard-control { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.clipboard-control h2, .clipboard-control p { margin: 0; }
+.switch { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; cursor: pointer; }
+.switch input { width: 20px; height: 20px; accent-color: var(--ink); }
+.clipboard-peer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--rule); }
+.clipboard-peer:last-child { border-bottom: 0; }
+.clipboard-peer label { display: flex; align-items: center; gap: 12px; margin: 0; cursor: pointer; }
+.clipboard-peer input { width: 18px; height: 18px; flex: none; accent-color: var(--ink); }
+.clipboard-event { padding: 14px 0; border-top: 1px solid var(--rule); }
+.clipboard-event p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .call-notice { border-left-color: #2e816b; background: #e3eee9; }
 .call-state { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .call-state h2 { margin-bottom: 3px; }
