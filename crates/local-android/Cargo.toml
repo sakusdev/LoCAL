@@ -13,4 +13,4 @@ local-core.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 jni = "0.21"
-
+base64 = "0.22"

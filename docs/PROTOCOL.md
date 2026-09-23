@@ -34,7 +34,7 @@ Screen metadata is directional. `encode` describes codecs and limits available w
 
 `control_target` requires `screen.control` and an encode/share role. `system_audio_capture` requires `screen.audio` plus an encode role; `system_audio_playback` requires `screen.audio` plus a decode role. Duplicate codecs, zero dimensions/FPS, dimensions above 16384, FPS above 240, or inconsistent role/capability combinations are rejected.
 
-Current v0.1 builds advertise only `text`, `file`, and `clipboard`; screen capability advertisement begins only when a real capture or decode backend calls the core capability registration API before connecting peers.
+Audio-call and screen capabilities are registered by the local UI only after the required WebRTC/WebCodecs backend is available and before connecting peers. CLI-only nodes therefore do not advertise media features they cannot use.
 
 The local state snapshot exposes both `capabilities` and `capabilities_authenticated`. Connected peers always use the TLS-authenticated Hello values, preventing a forged discovery beacon from overriding a live session.
 
@@ -47,10 +47,17 @@ Normal operations open separate QUIC bidirectional streams. CBOR frames use a fo
 - `file`: UUID `id`, safe basename `name`, `size` (0–20GiB), BLAKE3 `hash` (64 lowercase hexadecimal characters)
 - `screen_offer`: validated `ScreenOffer`
 - `screen_signal`: UUID session `id` plus `stop` or `request_keyframe`
+- `audio_signal`: UUID call ID, `offer` / `answer` / `candidate` / `reject` / `end` kind, and at most 64KiB of JSON WebRTC signaling data
 
 Replies contain `ok`, `error`, `offset`, and an optional `accepted` decision used by screen offers. Text is saved before acknowledgement with a composite message ID / peer ID / direction key. Timestamps are local. UI polls local state independently of network framing.
 
 Message, file and screen handlers verify pairing and the authenticated peer capability metadata before accepting data. Legacy v1 peers remain compatible through the original-MVP fallback described above.
+
+## Audio calls
+
+Audio calls use the authenticated QUIC session for WebRTC offer, answer, ICE candidate, reject and end signals. Only a paired peer advertising `audio` may send them. The receiver bounds the in-memory signal queue to 256 events and exposes it to the local UI through a monotonic cursor; call signaling is not written to message history.
+
+Media does not pass through a LoCAL server. WebRTC negotiates a direct LAN route with no STUN or TURN configuration, then protects audio using its DTLS-SRTP transport. Microphone access begins only after the user presses “電話をかける” or accepts an incoming call. The current implementation is one-to-one, audio-only, and has no Internet rendezvous or relay fallback.
 
 ## Files
 
@@ -101,8 +108,8 @@ The fixed frame header is 21 bytes. `payload_len` must be 1–16MiB; invalid fla
 
 The incoming video queue retains at most four encoded frames and drops the oldest queued frame under renderer backpressure. This deliberately favors freshness over building unlimited latency. Screen state is bounded to 8 active/pending sessions and 50 visible session records. Disconnect and local shutdown close pending/active screen state.
 
-Remote pointer/keyboard events and system-audio media transport are **not** implemented by this session layer yet; their capabilities remain independently negotiated for later phases. See [`SCREEN_SHARING.md`](SCREEN_SHARING.md) for capture backends, permission separation and the remaining implementation sequence.
+Android registers an H.264 decode role only when its WebView reports a usable WebCodecs decoder. It pulls bounded encoded frames from the same QUIC video queue and renders them locally. Android screen capture, remote pointer/keyboard events and system-audio media transport are **not** implemented yet; their capabilities remain independently negotiated for later phases. See [`SCREEN_SHARING.md`](SCREEN_SHARING.md) for capture backends, permission separation and the remaining implementation sequence.
 
 ## Storage and future work
 
-`identity.json` has mode 0600 on Unix, its data directory 0700. A process lock prevents simultaneous use. SQLite WAL stores trusted IDs, name and messages; UI shows latest 200 messages. File content is separate. Future channels include platform screen capture/rendering, Opus, sensors, clipboard images and custom channels; v1 does not silently accept them.
+`identity.json` has mode 0600 on Unix, its data directory 0700. A process lock prevents simultaneous use. SQLite WAL stores trusted IDs, name and messages; UI shows latest 200 messages. File content is separate. Future channels include Android screen capture, sensors, clipboard images and custom channels; v1 does not silently accept them.

@@ -24,7 +24,7 @@ const server = http.createServer((req,res) => {
       const offers={};
       offers[incoming]={id:incoming,peer_id:peer,direction:'in',status:'offered',error:'',
         offer:{id:incoming,resource:'screen/display/display-1',codec:'h264',width:640,height:360,fps:15}};
-      const state={version:'0.2.3',device:{id:local,name:'My PC',port:53319,addresses:[],
+      const state={version:'0.3.0',device:{id:local,name:'My PC',port:53319,addresses:[],
         screen:{decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}},
         peers:[{id:peer,name:'<img src=x onerror=alert(1)> peer',address:'10.1.1.2:53319',
           ready:true,screen:{decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}}],
@@ -79,5 +79,42 @@ const server = http.createServer((req,res) => {
     assert.deepEqual(errors,[]);
     await page.close();
     console.log('PASS Windows screen: capability detection, consent, decoded frame dispatch, stop and safe source labels');
+
+    const androidPage = await browser.newPage();
+    const androidErrors=[];androidPage.on('pageerror',error=>androidErrors.push(error.message));
+    await androidPage.addInitScript(() => {
+      const peer='b'.repeat(64),local='a'.repeat(64),id='52c26a8a-25d8-4751-802e-57e8bfe92732';
+      const state={version:'0.3.0',device:{id:local,name:'Phone',port:53319,addresses:[]},peers:[{id:peer,name:'Windows PC',address:'10.1.1.2:53319',ready:true,screen:{encode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/tmp',screen_sessions:[{id,peer_id:peer,direction:'in',status:'active',error:'',offer:{id,resource:'screen/display/display-1',codec:'h264',width:640,height:360,fps:15}}]};
+      window.androidDecoded=[];let polled=false;
+      class MockVideoDecoder {
+        static async isConfigSupported(){return {supported:true};}
+        constructor(){this.state='unconfigured';this.decodeQueueSize=0;}
+        configure(){this.state='configured';}
+        decode(chunk){window.androidDecoded.push(chunk);}
+        close(){this.state='closed';}
+      }
+      window.VideoDecoder=MockVideoDecoder;
+      window.EncodedVideoChunk=class {constructor(data){Object.assign(this,data);}};
+      window.LocalNative={invoke(callId,body){
+        const request=JSON.parse(body);let data={};
+        if(request.op==='snapshot') data=state;
+        else if(request.op==='received_files') data={files:[],total:0,offset:0,limit:50};
+        else if(request.op==='enable_screen_view') data={enabled:true};
+        else if(request.op==='watch_screen') data={watching:true};
+        else if(request.op==='poll_screen_frame') {data=polled?{ended:true,frame:null}:{frame:{sequence:1,timestamp_us:77,keyframe:true,data:btoa('android-frame')}};polled=true;}
+        else if(request.op==='audio_signals') data={events:[],latest:0};
+        setTimeout(()=>window.localResolve(callId,JSON.stringify({ok:true,data})),1);
+      }};
+    });
+    await androidPage.goto('http://127.0.0.1:' + server.address().port);
+    await androidPage.locator('#screen-nav').waitFor({state:'visible'});
+    await androidPage.locator('[data-tab="screen"]').click();
+    await androidPage.getByRole('button',{name:'表示する',exact:true}).click();
+    await androidPage.waitForFunction(()=>window.androidDecoded.length===1);
+    assert.equal(await androidPage.evaluate(()=>window.androidDecoded[0].timestamp),77);
+    assert.equal(await androidPage.locator('#screen-share-panel').isHidden(),true);
+    assert.deepEqual(androidErrors,[]);
+    await androidPage.close();
+    console.log('PASS Android screen: WebCodecs capability, native frame polling, H.264 decode and viewer-only UI');
   } finally {await browser.close();server.close();}
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});
