@@ -52,8 +52,8 @@
       <form id="message-form" class="composer"><label class="sr-only" for="message">メッセージ</label><textarea id="message" placeholder="メッセージを入力…" maxlength="16384" rows="3"></textarea><div class="composer-actions"><button type="button" id="paste-clipboard" class="secondary">クリップボードを貼り付け</button><button type="submit" id="send-message" class="primary">送信 ↗</button></div></form>
     </section>
     <section id="view-screen" class="view" hidden>
-      <div class="page-heading"><h1>画面共有</h1><p>Windowsの画面をWindowsまたはAndroidから閲覧できます。音声・遠隔操作はありません。</p></div>
-      <div class="settings-card" id="screen-share-panel"><h2>自分の画面を共有</h2><label for="screen-peer">共有する相手</label><select id="screen-peer"></select><label for="screen-source">表示する画面</label><select id="screen-source"></select><div class="actions"><button id="screen-refresh-sources" class="secondary">画面を更新</button><button id="screen-share" class="primary">共有を申し込む</button></div><p class="muted small">相手が承認してから画面の取得を開始します。</p></div>
+      <div class="page-heading"><h1>画面共有</h1><p>WindowsまたはAndroidの画面を、ペアリング済み端末から閲覧できます。音声・遠隔操作はありません。</p></div>
+      <div class="settings-card" id="screen-share-panel"><h2>自分の画面を共有</h2><label for="screen-peer">共有する相手</label><select id="screen-peer"></select><label for="screen-source">共有する画面</label><select id="screen-source"></select><div class="actions"><button id="screen-refresh-sources" class="secondary">画面を更新</button><button id="screen-share" class="primary">共有を申し込む</button></div><p class="muted small">相手が承認してから画面の取得を開始します。</p></div>
       <div class="section-title"><h2>画面セッション</h2></div><div id="screen-sessions"></div>
       <div id="screen-viewer" class="settings-card" hidden><h2>受信中の画面</h2><canvas id="screen-canvas" aria-label="相手の共有画面"></canvas><div class="actions"><button id="screen-stop" class="danger-button">表示を終了</button></div></div>
     </section>
