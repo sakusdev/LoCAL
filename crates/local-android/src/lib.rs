@@ -1,12 +1,12 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use jni::{
-    objects::{JClass, JString},
-    sys::jstring,
+    objects::{JByteArray, JClass, JString},
+    sys::{jboolean, jlong, jstring, JNI_FALSE, JNI_TRUE},
     JNIEnv,
 };
 use local_core::{
-    protocol::{ScreenCapabilities, ScreenCodec, ScreenMediaCapabilities},
-    Config, Node, ScreenVideoReceiver,
+    protocol::{ScreenCapabilities, ScreenCodec, ScreenFrameHeader, ScreenMediaCapabilities, ScreenOffer},
+    Config, Node, ScreenVideoReceiver, ScreenVideoSender,
 };
 use serde_json::{json, Value};
 use std::{
@@ -18,8 +18,12 @@ use std::{
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 static NODE: Mutex<Option<Arc<Node>>> = Mutex::new(None);
 static SCREEN_RECEIVERS: OnceLock<Mutex<HashMap<String, ScreenVideoReceiver>>> = OnceLock::new();
+static SCREEN_SENDERS: OnceLock<Mutex<HashMap<String, ScreenVideoSender>>> = OnceLock::new();
 fn screen_receivers() -> &'static Mutex<HashMap<String, ScreenVideoReceiver>> {
     SCREEN_RECEIVERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn screen_senders() -> &'static Mutex<HashMap<String, ScreenVideoSender>> {
+    SCREEN_SENDERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| tokio::runtime::Runtime::new().expect("Tokio runtime"))
@@ -88,7 +92,12 @@ pub extern "system" fn Java_org_sakus_local_Native_command(
         match value.get("op").and_then(Value::as_str) {
             Some("enable_screen_view") => {
                 node.set_screen_capabilities(Some(ScreenCapabilities {
-                    encode: None,
+                    encode: Some(ScreenMediaCapabilities {
+                        codecs: vec![ScreenCodec::H264],
+                        max_width: 1280,
+                        max_height: 720,
+                        max_fps: 30,
+                    }),
                     decode: Some(ScreenMediaCapabilities {
                         codecs: vec![ScreenCodec::H264],
                         max_width: 1920,
@@ -155,9 +164,36 @@ pub extern "system" fn Java_org_sakus_local_Native_command(
                     Ok(None) => Ok(json!({"ended":true,"frame":null})),
                 }
             }
+            Some("android_share_screen") => {
+                let peer_id = value.get("peer_id").and_then(Value::as_str).ok_or("Missing peer_id")?;
+                let width = value.get("width").and_then(Value::as_u64).ok_or("Missing width")? as u32;
+                let height = value.get("height").and_then(Value::as_u64).ok_or("Missing height")? as u32;
+                let fps = value.get("fps").and_then(Value::as_u64).unwrap_or(15).clamp(1, 30) as u16;
+                let id = value.get("id").and_then(Value::as_str).ok_or("Missing screen session id")?.to_owned();
+                let offer = ScreenOffer {
+                    id: id.clone(),
+                    resource: "screen/display/display-0".into(),
+                    codec: ScreenCodec::H264,
+                    width,
+                    height,
+                    fps,
+                    system_audio: false,
+                    control: false,
+                };
+                let accepted = runtime().block_on(node.offer_screen(peer_id, offer)).map_err(|e| e.to_string())?;
+                if accepted {
+                    let sender = runtime().block_on(node.open_screen_video(&id)).map_err(|e| e.to_string())?;
+                    screen_senders().lock().map_err(|e| e.to_string())?.insert(id.clone(), sender);
+                }
+                Ok(json!({"id":id,"accepted":accepted,"width":width,"height":height,"fps":fps}))
+            }
             Some("stop_screen") => {
                 if let Some(id) = value.get("id").and_then(Value::as_str) {
                     screen_receivers()
+                        .lock()
+                        .map_err(|e| e.to_string())?
+                        .remove(id);
+                    screen_senders()
                         .lock()
                         .map_err(|e| e.to_string())?
                         .remove(id);
@@ -182,9 +218,49 @@ pub extern "system" fn Java_org_sakus_local_Native_command(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_org_sakus_local_Native_pushScreenFrame(
+    mut env: JNIEnv,
+    _: JClass,
+    id: JString,
+    sequence: jlong,
+    timestamp_us: jlong,
+    keyframe: jboolean,
+    data: JByteArray,
+) -> jboolean {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let id = text(&mut env, id)?;
+        let bytes = env.convert_byte_array(data).map_err(|e| e.to_string())?;
+        let node = NODE.lock().map_err(|e| e.to_string())?.clone().ok_or("LoCAL is starting")?;
+        let active = node.screen_sessions().into_iter().any(|s| s.id == id && s.direction == "out" && s.status == "active");
+        if !active { return Ok::<bool, String>(false); }
+        let mut sender = screen_senders().lock().map_err(|e| e.to_string())?.remove(&id).ok_or("Screen sender is not active")?;
+        let header = ScreenFrameHeader {
+            sequence: sequence.max(0) as u64,
+            timestamp_us: timestamp_us.max(0) as u64,
+            keyframe: keyframe != JNI_FALSE,
+            payload_len: bytes.len() as u32,
+        };
+        let sent = runtime().block_on(sender.send_frame(header, &bytes));
+        if sent.is_ok() {
+            screen_senders().lock().map_err(|e| e.to_string())?.insert(id, sender);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }));
+    match result {
+        Ok(Ok(true)) => JNI_TRUE,
+        _ => JNI_FALSE,
+    }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_org_sakus_local_Native_stop(_: JNIEnv, _: JClass) {
     if let Ok(mut receivers) = screen_receivers().lock() {
         receivers.clear();
+    }
+    if let Ok(mut senders) = screen_senders().lock() {
+        senders.clear();
     }
     if let Ok(mut node) = NODE.lock() {
         if let Some(node) = node.take() {

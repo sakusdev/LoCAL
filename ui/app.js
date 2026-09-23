@@ -280,6 +280,55 @@ $('manual-form').onsubmit = (event) => {
 };
 $('chat-peer').onchange = () => { chosenPeer = $('chat-peer').value; renderMessages(); };
 let clipboardDraft = false;
+
+// Clipboard sync is opt-in because clipboard contents can be sensitive. Once enabled,
+// only paired peers that authenticated the clipboard capability participate.
+const clipboardSyncKey = 'local.clipboard-sync';
+let clipboardSyncEnabled = localStorage.getItem(clipboardSyncKey) === '1';
+let clipboardSyncPrimed = false;
+let clipboardLastLocal = '';
+const clipboardSeen = new Set();
+
+async function clipboardSyncTick() {
+  if (!clipboardSyncEnabled || document.hidden || !snapshot || (!android && !desktop)) return;
+  const clipboardMessages = snapshot.messages.filter((m) => m.channel === 'mesh.clipboard');
+  if (!clipboardSyncPrimed) {
+    clipboardMessages.forEach((m) => clipboardSeen.add(m.id));
+    try { clipboardLastLocal = await command({op:'read_clipboard'}) || ''; } catch {}
+    clipboardSyncPrimed = true;
+    return;
+  }
+
+  const incoming = clipboardMessages
+    .filter((m) => m.direction === 'in' && !clipboardSeen.has(m.id))
+    .sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0))[0];
+  clipboardMessages.forEach((m) => clipboardSeen.add(m.id));
+  if (incoming && incoming.text !== clipboardLastLocal) {
+    await command({op:'write_clipboard',text:incoming.text});
+    clipboardLastLocal = incoming.text;
+  }
+
+  const text = await command({op:'read_clipboard'}) || '';
+  if (!text || text === clipboardLastLocal) return;
+  if (new TextEncoder().encode(text).length > 16384) return;
+  clipboardLastLocal = text;
+  const peers = snapshot.peers.filter((p) => p.ready && p.capabilities?.includes('clipboard'));
+  await Promise.allSettled(peers.map((peer) =>
+    command({op:'send_text',peer_id:peer.id,text,channel:'mesh.clipboard'})
+  ));
+}
+
+$('clipboard-sync').checked = clipboardSyncEnabled;
+$('clipboard-sync').onchange = () => {
+  clipboardSyncEnabled = $('clipboard-sync').checked;
+  localStorage.setItem(clipboardSyncKey, clipboardSyncEnabled ? '1' : '0');
+  clipboardSyncPrimed = false;
+  toast(clipboardSyncEnabled ? 'クリップボード同期を有効にしました' : 'クリップボード同期を無効にしました');
+};
+setInterval(() => { clipboardSyncTick().catch((error) => {
+  if (clipboardSyncEnabled) console.warn('Clipboard sync:', error);
+}); }, 900);
+
 $('paste-clipboard').onclick = () => action('clipboard',async () => {
   const text = await command({op:'read_clipboard'});
   if (!text) return toast('クリップボードにテキストがありません');

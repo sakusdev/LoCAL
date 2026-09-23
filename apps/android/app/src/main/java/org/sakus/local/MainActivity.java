@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.content.*;
 import android.database.Cursor;
 import android.net.Uri;
+import android.media.projection.MediaProjectionManager;
+import android.util.DisplayMetrics;
 import android.os.*;
 import android.provider.OpenableColumns;
 import android.webkit.*;
@@ -19,7 +21,9 @@ public final class MainActivity extends Activity {
     private String pickerId, pickerPeer, exportId;
     private File exportSource;
     private PermissionRequest microphoneRequest;
-    private static final int PICK = 101, EXPORT = 102, MICROPHONE = 104;
+    private String screenShareRequestId;
+    private JSONObject screenShareRequest;
+    private static final int PICK = 101, EXPORT = 102, MICROPHONE = 104, SCREEN_CAPTURE = 105;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -105,6 +109,19 @@ public final class MainActivity extends Activity {
                             if ("write_clipboard".equals(op)) { manager.setPrimaryClip(ClipData.newPlainText("LoCAL", request.optString("text"))); success(id, ""); }
                             else { ClipData clip = manager.getPrimaryClip(); success(id, clip != null && clip.getItemCount() > 0 ? clip.getItemAt(0).coerceToText(MainActivity.this).toString() : ""); }
                         });
+                    } else if ("screen_sources".equals(op)) {
+                        int[] size = screenSize(request.optInt("max_width", 1280), request.optInt("max_height", 720));
+                        success(id, new JSONObject().put("sources", new JSONArray().put(
+                            new JSONObject().put("id", "display-0").put("name", "Android の画面").put("width", size[0]).put("height", size[1])
+                        )));
+                    } else if ("share_screen".equals(op)) {
+                        runOnUiThread(() -> {
+                            if (screenShareRequestId != null) { fail(id, "画面共有の確認中です"); return; }
+                            screenShareRequestId = id;
+                            screenShareRequest = request;
+                            MediaProjectionManager manager = getSystemService(MediaProjectionManager.class);
+                            startActivityForResult(manager.createScreenCaptureIntent(), SCREEN_CAPTURE);
+                        });
                     } else {
                         if (MeshService.startupError != null) { throw new IOException(MeshService.startupError); }
                         reply(id, Native.command(body));
@@ -115,7 +132,44 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request == PICK) {
+        if (request == SCREEN_CAPTURE) {
+            String id = screenShareRequestId;
+            JSONObject pending = screenShareRequest;
+            screenShareRequestId = null;
+            screenShareRequest = null;
+            if (id == null || pending == null) { return; }
+            if (result != RESULT_OK || data == null) {
+                try { success(id, new JSONObject().put("accepted", false)); } catch (Exception ignored) {}
+                return;
+            }
+            final Intent projectionData = data;
+            MeshService.WORK.execute(() -> {
+                try {
+                    int[] size = screenSize(pending.optInt("max_width", 1280), pending.optInt("max_height", 720));
+                    int fps = Math.max(1, Math.min(30, pending.optInt("max_fps", 15)));
+                    JSONObject nativeRequest = new JSONObject()
+                        .put("op", "android_share_screen")
+                        .put("id", UUID.randomUUID().toString())
+                        .put("peer_id", pending.getString("peer_id"))
+                        .put("width", size[0]).put("height", size[1]).put("fps", fps);
+                    JSONObject response = new JSONObject(Native.command(nativeRequest.toString()));
+                    if (!response.optBoolean("ok")) { throw new IOException(response.optString("error", "Cannot start screen sharing")); }
+                    JSONObject shared = response.getJSONObject("data");
+                    if (shared.optBoolean("accepted")) {
+                        Intent service = new Intent(MainActivity.this, ScreenShareService.class)
+                            .putExtra("session_id", shared.getString("id"))
+                            .putExtra("width", shared.getInt("width"))
+                            .putExtra("height", shared.getInt("height"))
+                            .putExtra("fps", shared.getInt("fps"))
+                            .putExtra("density", getResources().getDisplayMetrics().densityDpi)
+                            .putExtra("result_code", result)
+                            .putExtra("projection_data", projectionData);
+                        startForegroundService(service);
+                    }
+                    success(id, shared);
+                } catch (Throwable e) { fail(id, e.getMessage() == null ? e.toString() : e.getMessage()); }
+            });
+        } else if (request == PICK) {
             String id = pickerId, peer = pickerPeer; pickerId = null; pickerPeer = null;
             if (id == null) { return; }
             if (result != RESULT_OK || data == null) { success(id, JSONObject.NULL); return; }
@@ -171,6 +225,20 @@ public final class MainActivity extends Activity {
             request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
         } else { request.deny(); }
     }
+    private int[] screenSize(int maxWidth, int maxHeight) {
+        DisplayMetrics metrics = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getRealMetrics(metrics);
+        int sourceWidth = Math.max(2, metrics.widthPixels);
+        int sourceHeight = Math.max(2, metrics.heightPixels);
+        double scale = Math.min(1.0, Math.min(
+            Math.max(2, maxWidth) / (double)sourceWidth,
+            Math.max(2, maxHeight) / (double)sourceHeight
+        ));
+        int width = Math.max(2, ((int)Math.floor(sourceWidth * scale)) & ~1);
+        int height = Math.max(2, ((int)Math.floor(sourceHeight * scale)) & ~1);
+        return new int[]{width, height};
+    }
+
     private static void copy(InputStream input, OutputStream output, long limit) throws IOException {
         if (input == null || output == null) { throw new IOException("Cannot open document"); }
         byte[] buffer = new byte[1024 * 1024]; long total = 0; int n;
