@@ -8,6 +8,7 @@
   <title>LoCAL</title>
   <link rel="stylesheet" href="style.css">
   <script src="app.js" defer></script>
+  <script src="clipboard.js" defer></script>
   <script src="calls.js" defer></script>
   <script src="screen.js" defer></script>
 </head>
@@ -18,6 +19,7 @@
       <button data-tab="nearby" class="nav-item active"><span class="nav-icon">◎</span><span>近くの端末</span><span id="peer-count" class="count">0</span></button>
       <button data-tab="transfers" class="nav-item"><span class="nav-icon">⇄</span><span>ファイル転送</span><span id="transfer-count" class="count">0</span></button>
       <button data-tab="history" class="nav-item"><span class="nav-icon">◷</span><span>メッセージ</span></button>
+      <button data-tab="clipboard" class="nav-item"><span class="nav-icon">▤</span><span>クリップボード</span></button>
       <button data-tab="calls" id="calls-nav" class="nav-item" hidden><span class="nav-icon">☎</span><span>通話</span></button>
       <button data-tab="screen" id="screen-nav" class="nav-item" hidden><span class="nav-icon">▣</span><span>画面共有</span></button>
       <button data-tab="settings" class="nav-item"><span class="nav-icon">⚙</span><span>設定</span></button>
@@ -51,8 +53,18 @@
       <div id="messages" class="messages" aria-live="polite"></div>
       <form id="message-form" class="composer"><label class="sr-only" for="message">メッセージ</label><textarea id="message" placeholder="メッセージを入力…" maxlength="16384" rows="3"></textarea><div class="composer-actions"><button type="button" id="paste-clipboard" class="secondary">クリップボードを貼り付け</button><button type="submit" id="send-message" class="primary">送信 ↗</button></div></form>
     </section>
+    <section id="view-clipboard" class="view" hidden>
+      <div class="page-heading"><h1>クリップボード同期</h1><p>選んだ端末と、コピーしたテキストをLAN内で同期します。</p></div>
+      <div class="settings-card clipboard-control">
+        <div><h2>同期</h2><p id="clipboard-state" class="muted small">停止中</p></div>
+        <label class="switch"><input id="clipboard-enabled" type="checkbox"><span>同期を有効にする</span></label>
+      </div>
+      <div class="settings-card"><h2>同期する端末</h2><div id="clipboard-peers"></div><div class="actions"><button id="clipboard-select-all" class="secondary">接続中をすべて選択</button></div></div>
+      <div class="settings-card"><h2>手動操作</h2><div class="actions"><button id="clipboard-send-now" class="primary">現在のテキストを送る</button><button id="clipboard-pull-latest" class="secondary">最新の受信テキストをコピー</button></div><p class="muted small">自動同期はLoCALを開いている間だけ動作します。パスワードなどをコピーする前は同期を停止してください。</p></div>
+      <div class="section-title"><h2>最近の同期</h2></div><div id="clipboard-events"></div>
+    </section>
     <section id="view-screen" class="view" hidden>
-      <div class="page-heading"><h1>画面共有</h1><p>Windowsの画面をWindowsまたはAndroidから閲覧できます。音声・遠隔操作はありません。</p></div>
+      <div class="page-heading"><h1>画面共有</h1><p>WindowsまたはAndroidの画面を、対応端末から閲覧できます。音声・遠隔操作はありません。</p></div>
       <div class="settings-card" id="screen-share-panel"><h2>自分の画面を共有</h2><label for="screen-peer">共有する相手</label><select id="screen-peer"></select><label for="screen-source">表示する画面</label><select id="screen-source"></select><div class="actions"><button id="screen-refresh-sources" class="secondary">画面を更新</button><button id="screen-share" class="primary">共有を申し込む</button></div><p class="muted small">相手が承認してから画面の取得を開始します。</p></div>
       <div class="section-title"><h2>画面セッション</h2></div><div id="screen-sessions"></div>
       <div id="screen-viewer" class="settings-card" hidden><h2>受信中の画面</h2><canvas id="screen-canvas" aria-label="相手の共有画面"></canvas><div class="actions"><button id="screen-stop" class="danger-button">表示を終了</button></div></div>
@@ -68,7 +80,7 @@
       <div class="settings-card"><h2>この端末</h2><form id="name-form"><label for="device-name">端末の名前</label><div class="input-row"><input id="device-name" maxlength="80" placeholder="端末の名前"><button class="primary" type="submit">保存</button></div></form><label>接続用アドレス</label><div id="addresses" class="info-value">—</div><label>Device ID / 公開鍵の指紋</label><div id="fingerprint" class="mono fingerprint">—</div><p class="muted small">表示名が同じでも鍵が変わった端末は、もう一度ペアリングが必要です。</p></div>
       <div class="settings-card"><h2>信頼済みの端末</h2><div id="trusted"></div></div>
       <div class="settings-card"><h2>保存とプライバシー</h2><label>受信ファイルの保存先</label><div id="receive-dir" class="mono fingerprint"></div><p id="storage-note" class="muted small"></p><div class="settings-row"><span>メッセージ履歴</span><button id="clear-history" class="danger-button">履歴を削除</button></div></div>
-      <p class="muted small">LoCAL v<span id="version">0.3.0</span> · QUIC / TLS 1.3 · BLAKE3<br>センサー・QRペアリングは今後のバージョンで対応予定です。</p>
+      <p class="muted small">LoCAL v<span id="version">0.4.0</span> · QUIC / TLS 1.3 · BLAKE3<br>センサー・QRペアリングは今後のバージョンで対応予定です。</p>
     </section>
   </main>
   <dialog id="manual-dialog"><form id="manual-form"><div class="dialog-heading"><h2>アドレスで接続</h2><button type="button" data-close="manual-dialog" class="icon-button" aria-label="閉じる">×</button></div><p>相手のLoCALの「設定」に表示されたアドレスを入力してください。</p><label for="manual-address">IPアドレス : ポート</label><input id="manual-address" placeholder="192.168.1.20:53319" inputmode="url" required><p class="muted small">両方の端末を同じWi-Fiに接続してください。</p><button type="submit" class="primary full">接続する ↗</button></form></dialog>

@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.*;
 import android.database.Cursor;
 import android.net.Uri;
+import android.media.projection.MediaProjectionManager;
 import android.os.*;
 import android.provider.OpenableColumns;
 import android.webkit.*;
@@ -19,7 +20,12 @@ public final class MainActivity extends Activity {
     private String pickerId, pickerPeer, exportId;
     private File exportSource;
     private PermissionRequest microphoneRequest;
-    private static final int PICK = 101, EXPORT = 102, MICROPHONE = 104;
+    private ClipboardManager clipboardManager;
+    private ClipboardManager.OnPrimaryClipChangedListener clipboardListener;
+    private volatile long clipboardRevision;
+    private String screenCallId;
+    private JSONObject screenSession;
+    private static final int PICK = 101, EXPORT = 102, MICROPHONE = 104, SCREEN_CAPTURE = 105;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -28,6 +34,9 @@ public final class MainActivity extends Activity {
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 103);
         }
         web = new WebView(this);
+        clipboardManager = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+        clipboardListener = () -> clipboardRevision++;
+        clipboardManager.addPrimaryClipChangedListener(clipboardListener);
         web.setBackgroundColor(0xfff1eee6);
         web.getSettings().setJavaScriptEnabled(true);
         web.getSettings().setDomStorageEnabled(true);
@@ -99,11 +108,40 @@ public final class MainActivity extends Activity {
                             exportId = id; exportSource = source;
                             startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE, request.optString("name", source.getName())), EXPORT);
                         });
+                    } else if ("clipboard_revision".equals(op)) {
+                        success(id, clipboardRevision);
                     } else if ("read_clipboard".equals(op) || "write_clipboard".equals(op)) {
                         runOnUiThread(() -> {
-                            ClipboardManager manager = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-                            if ("write_clipboard".equals(op)) { manager.setPrimaryClip(ClipData.newPlainText("LoCAL", request.optString("text"))); success(id, ""); }
-                            else { ClipData clip = manager.getPrimaryClip(); success(id, clip != null && clip.getItemCount() > 0 ? clip.getItemAt(0).coerceToText(MainActivity.this).toString() : ""); }
+                            if ("write_clipboard".equals(op)) { clipboardManager.setPrimaryClip(ClipData.newPlainText("LoCAL", request.optString("text"))); success(id, ""); }
+                            else { ClipData clip = clipboardManager.getPrimaryClip(); success(id, clip != null && clip.getItemCount() > 0 ? clip.getItemAt(0).coerceToText(MainActivity.this).toString() : ""); }
+                        });
+                    } else if ("screen_sources".equals(op)) {
+                        runOnUiThread(() -> {
+                            android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+                            try {
+                                JSONObject source = new JSONObject().put("id", "display-0").put("name", "このAndroid画面")
+                                    .put("kind", "display").put("width", metrics.widthPixels).put("height", metrics.heightPixels).put("primary", true);
+                                success(id, new JSONObject().put("backend", "android-mediaprojection-mediacodec").put("sources", new JSONArray().put(source)));
+                            } catch (Throwable error) { fail(id, error.toString()); }
+                        });
+                    } else if ("share_screen".equals(op)) {
+                        if (!"display-0".equals(request.optString("source_id"))) { throw new IOException("Android screen source is unavailable"); }
+                        android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+                        request.put("source_width", metrics.widthPixels).put("source_height", metrics.heightPixels);
+                        if (MeshService.startupError != null) { throw new IOException(MeshService.startupError); }
+                        JSONObject response = new JSONObject(Native.command(request.toString()));
+                        JSONObject responseData = response.optJSONObject("data");
+                        if (!response.optBoolean("ok") || responseData == null || !responseData.optBoolean("accepted")) { reply(id, response.toString()); return; }
+                        runOnUiThread(() -> {
+                            if (screenCallId != null) {
+                                try { Native.command(new JSONObject().put("op", "stop_screen").put("id", responseData.optString("id")).toString()); } catch (Throwable ignored) {}
+                                fail(id, "画面共有の許可を確認中です");
+                                return;
+                            }
+                            screenCallId = id;
+                            screenSession = responseData;
+                            MediaProjectionManager manager = getSystemService(MediaProjectionManager.class);
+                            startActivityForResult(manager.createScreenCaptureIntent(), SCREEN_CAPTURE);
                         });
                     } else {
                         if (MeshService.startupError != null) { throw new IOException(MeshService.startupError); }
@@ -115,7 +153,40 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request == PICK) {
+        if (request == SCREEN_CAPTURE) {
+            String callId = screenCallId;
+            JSONObject session = screenSession;
+            screenCallId = null;
+            screenSession = null;
+            if (callId == null || session == null) { return; }
+            String sessionId = session.optString("id");
+            if (result != RESULT_OK || data == null) {
+                MeshService.WORK.execute(() -> { try { Native.command(new JSONObject().put("op", "stop_screen").put("id", sessionId).toString()); } catch (Throwable ignored) {} });
+                try { session.put("accepted", false).put("cancelled", true); } catch (Throwable ignored) {}
+                success(callId, session);
+                return;
+            }
+            JSONObject profile = session.optJSONObject("profile");
+            if (sessionId.isEmpty() || profile == null || profile.optInt("width") < 2 || profile.optInt("height") < 2 || profile.optInt("fps") < 1) {
+                MeshService.WORK.execute(() -> { try { Native.command(new JSONObject().put("op", "stop_screen").put("id", sessionId).toString()); } catch (Throwable ignored) {} });
+                fail(callId, "画面共有の設定を開始できませんでした");
+                return;
+            }
+            Intent capture = new Intent(this, ScreenShareService.class).setAction(ScreenShareService.ACTION_START)
+                .putExtra(ScreenShareService.EXTRA_SESSION, sessionId)
+                .putExtra(ScreenShareService.EXTRA_WIDTH, profile.optInt("width"))
+                .putExtra(ScreenShareService.EXTRA_HEIGHT, profile.optInt("height"))
+                .putExtra(ScreenShareService.EXTRA_FPS, profile.optInt("fps"))
+                .putExtra(ScreenShareService.EXTRA_RESULT_CODE, result)
+                .putExtra(ScreenShareService.EXTRA_RESULT_DATA, data);
+            try {
+                if (Build.VERSION.SDK_INT >= 26) { startForegroundService(capture); } else { startService(capture); }
+                success(callId, session);
+            } catch (Throwable error) {
+                MeshService.WORK.execute(() -> { try { Native.command(new JSONObject().put("op", "stop_screen").put("id", sessionId).toString()); } catch (Throwable ignored) {} });
+                fail(callId, error.getMessage() == null ? "画面共有を開始できませんでした" : error.getMessage());
+            }
+        } else if (request == PICK) {
             String id = pickerId, peer = pickerPeer; pickerId = null; pickerPeer = null;
             if (id == null) { return; }
             if (result != RESULT_OK || data == null) { success(id, JSONObject.NULL); return; }
@@ -176,5 +247,5 @@ public final class MainActivity extends Activity {
         byte[] buffer = new byte[1024 * 1024]; long total = 0; int n;
         while ((n = input.read(buffer)) != -1) { total += n; if (total > limit) { throw new IOException("File exceeds 20 GiB"); } output.write(buffer, 0, n); }
     }
-    @Override protected void onDestroy() { if (microphoneRequest != null) { microphoneRequest.deny(); microphoneRequest = null; } if (web != null) { web.removeJavascriptInterface("LocalNative"); web.destroy(); web = null; } super.onDestroy(); }
+    @Override protected void onDestroy() { if (microphoneRequest != null) { microphoneRequest.deny(); microphoneRequest = null; } if (clipboardManager != null && clipboardListener != null) { clipboardManager.removePrimaryClipChangedListener(clipboardListener); } if (web != null) { web.removeJavascriptInterface("LocalNative"); web.destroy(); web = null; } super.onDestroy(); }
 }

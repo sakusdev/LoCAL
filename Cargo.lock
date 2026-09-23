@@ -2249,18 +2249,20 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "local-android"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "jni",
  "local-core",
+ "local-screen",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
 name = "local-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2271,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "local-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2294,7 +2296,7 @@ dependencies = [
 
 [[package]]
 name = "local-desktop"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "local-core",
@@ -2310,7 +2312,7 @@ dependencies = [
 
 [[package]]
 name = "local-screen"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "local-core",

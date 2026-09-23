@@ -104,7 +104,7 @@ Platform capture belongs outside `local-core`. Each backend implements the `loca
 
 Preferred path: Windows Graphics Capture with hardware H.264 through Media Foundation where available. Desktop Duplication is a fallback for older or unusual systems.
 
-The v0.3 preview captures displays through Windows Graphics Capture and encodes through a conservative OpenH264 software path. Windows WebView2 and Android WebView decode Annex B H.264 only after runtime codec probing. The viewer requires explicit acceptance and the sender starts capture after that acceptance. Android capture, hardware encoding and two-device visual performance testing remain future work.
+The Windows path captures displays through Windows Graphics Capture and encodes through a conservative OpenH264 software path. Desktop and Android WebViews decode Annex B H.264 only after runtime codec probing. The viewer requires explicit acceptance and the sender starts capture after that acceptance. Two-device visual performance testing remains future work.
 
 ### macOS
 
@@ -116,7 +116,7 @@ Preferred path on Wayland: xdg-desktop-portal + PipeWire. On X11, use an explici
 
 ### Android
 
-Use MediaProjection. Android must show the operating-system capture consent dialog; LoCAL must never attempt to suppress or work around it. MediaCodec is the preferred hardware encoder/decoder.
+The v0.4 path uses MediaProjection and a surface-input MediaCodec H.264 encoder. The receiver accepts first; Android then shows its operating-system capture consent dialog. LoCAL never suppresses or works around it. A dedicated `mediaProjection` foreground service displays a persistent sharing notification and stops the authenticated screen session when capture ends. Frames are converted to Annex B access units, codec configuration is prepended to keyframes, and receiver keyframe requests are forwarded to MediaCodec.
 
 ## Remote control
 
@@ -179,7 +179,7 @@ System audio is negotiated separately from video. A source must advertise `scree
 - bounded pending/active session state and freshness-oriented receive queue
 - real two-peer QUIC integration tests for accept, video, keyframe, stop and rejection
 
-### Phase S1 — desktop view-only prototype
+### Phase S1 — desktop view-only prototype ✅
 
 - enumerate displays / windows
 - capture one source
@@ -188,12 +188,12 @@ System audio is negotiated separately from video. A source must advertise `scree
 - explicit offer / accept UI
 - adaptive bitrate and FPS caps
 
-### Phase S2 — Android interoperability
+### Phase S2 — Android interoperability ✅
 
 - MediaProjection capture
 - MediaCodec encode/decode
 - Android ↔ desktop view-only sessions
-- rotation and resolution-change handling
+- fixed-session dimensions with aspect-ratio-preserving portrait/landscape fitting
 
 ### Phase S3 — audio
 

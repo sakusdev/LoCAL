@@ -1,1 +1,1 @@
-{"name":"local-ui-tests","private":true,"scripts":{"test":"node smoke.cjs && node calls.cjs && node screen.cjs"},"devDependencies":{"playwright":"1.58.2"}}
+{"name":"local-ui-tests","private":true,"scripts":{"test":"node smoke.cjs && node clipboard.cjs && node calls.cjs && node screen.cjs"},"devDependencies":{"playwright":"1.58.2"}}
