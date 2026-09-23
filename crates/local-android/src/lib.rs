@@ -82,7 +82,10 @@ fn android_screen_capabilities() -> ScreenCapabilities {
 }
 
 fn positive_u32(value: &Value, name: &str, default: u32) -> Result<u32, String> {
-    let raw = value.get(name).and_then(Value::as_u64).unwrap_or(u64::from(default));
+    let raw = value
+        .get(name)
+        .and_then(Value::as_u64)
+        .unwrap_or(u64::from(default));
     let value = u32::try_from(raw).map_err(|_| format!("{name} is too large"))?;
     if value == 0 {
         return Err(format!("{name} must be positive"));
@@ -91,13 +94,18 @@ fn positive_u32(value: &Value, name: &str, default: u32) -> Result<u32, String> 
 }
 
 fn fit_dimensions(width: u32, height: u32, max_width: u32, max_height: u32) -> (u32, u32) {
-    let (fitted_width, fitted_height) = if u64::from(width) * u64::from(max_height)
-        > u64::from(height) * u64::from(max_width)
-    {
-        (max_width, (u64::from(height) * u64::from(max_width) / u64::from(width)) as u32)
-    } else {
-        ((u64::from(width) * u64::from(max_height) / u64::from(height)) as u32, max_height)
-    };
+    let (fitted_width, fitted_height) =
+        if u64::from(width) * u64::from(max_height) > u64::from(height) * u64::from(max_width) {
+            (
+                max_width,
+                (u64::from(height) * u64::from(max_width) / u64::from(width)) as u32,
+            )
+        } else {
+            (
+                (u64::from(width) * u64::from(max_height) / u64::from(height)) as u32,
+                max_height,
+            )
+        };
     ((fitted_width.max(2) & !1), (fitted_height.max(2) & !1))
 }
 
@@ -151,7 +159,11 @@ async fn prepare_android_screen(node: Arc<Node>, value: &Value) -> Result<Value,
         .get("peer_id")
         .and_then(Value::as_str)
         .ok_or("Missing peer_id")?;
-    if !outgoing_screens().lock().map_err(|e| e.to_string())?.is_empty() {
+    if !outgoing_screens()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .is_empty()
+    {
         return Err("Android can share one screen at a time".into());
     }
     let source_width = positive_u32(value, "source_width", 1080)?;
@@ -209,13 +221,16 @@ async fn prepare_android_screen(node: Arc<Node>, value: &Value) -> Result<Value,
         .map_err(|error| error.to_string())?;
     let (frame_tx, frame_rx) = mpsc::channel(2);
     let control = Arc::new(AtomicU8::new(0));
-    outgoing_screens().lock().map_err(|e| e.to_string())?.insert(
-        id.clone(),
-        AndroidScreenPipe {
-            frames: frame_tx,
-            control: control.clone(),
-        },
-    );
+    outgoing_screens()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(
+            id.clone(),
+            AndroidScreenPipe {
+                frames: frame_tx,
+                control: control.clone(),
+            },
+        );
     spawn_android_screen_sender(node, id.clone(), sender, signals, frame_rx, control);
     Ok(json!({"id":id,"accepted":true,"profile":profile}))
 }
@@ -273,7 +288,7 @@ pub extern "system" fn Java_org_sakus_local_Native_command(
         match value.get("op").and_then(Value::as_str) {
             Some("enable_screen_view") => {
                 node.set_screen_capabilities(Some(android_screen_capabilities()))
-                .map_err(|e| e.to_string())?;
+                    .map_err(|e| e.to_string())?;
                 Ok(json!({"enabled":true,"sharing":true}))
             }
             Some("share_screen") => runtime().block_on(prepare_android_screen(node, &value)),
@@ -341,7 +356,9 @@ pub extern "system" fn Java_org_sakus_local_Native_command(
                         .map_err(|e| e.to_string())?
                         .get(id)
                     {
-                        screen.control.fetch_or(SCREEN_CONTROL_STOP, Ordering::Release);
+                        screen
+                            .control
+                            .fetch_or(SCREEN_CONTROL_STOP, Ordering::Release);
                     }
                 }
                 runtime()
@@ -444,7 +461,9 @@ pub extern "system" fn Java_org_sakus_local_Native_stop(_: JNIEnv, _: JClass) {
     }
     if let Ok(mut screens) = outgoing_screens().lock() {
         for screen in screens.values() {
-            screen.control.fetch_or(SCREEN_CONTROL_STOP, Ordering::Release);
+            screen
+                .control
+                .fetch_or(SCREEN_CONTROL_STOP, Ordering::Release);
         }
         screens.clear();
     }
