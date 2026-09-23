@@ -67,6 +67,7 @@
       <div class="page-heading"><h1>設定</h1></div>
       <div class="settings-card"><h2>この端末</h2><form id="name-form"><label for="device-name">端末の名前</label><div class="input-row"><input id="device-name" maxlength="80" placeholder="端末の名前"><button class="primary" type="submit">保存</button></div></form><label>接続用アドレス</label><div id="addresses" class="info-value">—</div><label>Device ID / 公開鍵の指紋</label><div id="fingerprint" class="mono fingerprint">—</div><p class="muted small">表示名が同じでも鍵が変わった端末は、もう一度ペアリングが必要です。</p></div>
       <div class="settings-card"><h2>信頼済みの端末</h2><div id="trusted"></div></div>
+      <div class="settings-card"><h2>クリップボード</h2><div class="settings-row"><div><b>端末間で自動同期</b><p class="muted small">ペアリング済みでクリップボード対応の端末間だけで、テキストの変更をLAN内に直接同期します。</p></div><label class="toggle-label"><input id="clipboard-sync" type="checkbox"> 有効</label></div><p class="muted small">AndroidではOSの制限により、LoCALが画面に表示されている間の同期が最も確実です。</p></div>
       <div class="settings-card"><h2>保存とプライバシー</h2><label>受信ファイルの保存先</label><div id="receive-dir" class="mono fingerprint"></div><p id="storage-note" class="muted small"></p><div class="settings-row"><span>メッセージ履歴</span><button id="clear-history" class="danger-button">履歴を削除</button></div></div>
       <p class="muted small">LoCAL v<span id="version">0.3.0</span> · QUIC / TLS 1.3 · BLAKE3<br>センサー・QRペアリングは今後のバージョンで対応予定です。</p>
     </section>
