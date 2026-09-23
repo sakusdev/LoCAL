@@ -62,6 +62,7 @@
     setHtml('screen-peer', peers.map((p) => '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name) + '</option>').join('') ||
       '<option value="">画面表示に対応する接続済み端末はありません</option>');
     if (peers.some((p) => p.id === previous)) $('screen-peer').value = previous;
+    $('screen-share-panel').hidden = false;
     $('screen-share').disabled = !peers.length || !sources.length;
     const sessions = snapshot.screen_sessions || [];
     setHtml('screen-sessions', sessions.length ? sessions.map((s) => {
@@ -73,17 +74,12 @@
         s.offer.width + '×' + s.offer.height + '</p>' +
         (s.error ? '<p class="error-text">' + escapeHtml(s.error) + '</p>' : '') +
         '<div class="actions">' + actions + '</div></article>';
-    }).join('') : empty('画面共有はありません','ペアリング済みのWindows端末と画面を共有できます。'));
+    }).join('') : empty('画面共有はありません','ペアリング済みのWindows / Android端末と画面を共有できます。'));
     if (viewerId && !sessions.some((s) => s.id === viewerId && s.status === 'active')) closeViewer();
   }
 
   async function refreshSources() {
     if (!supported || loadingSources) return;
-    if (!windowsSource) {
-      sources = [];
-      $('screen-share-panel').hidden = true;
-      return;
-    }
     loadingSources = true;
     try {
       sources = (await command({op:'screen_sources'})).sources;
