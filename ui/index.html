@@ -8,6 +8,7 @@
   <title>LoCAL</title>
   <link rel="stylesheet" href="style.css">
   <script src="app.js" defer></script>
+  <script src="calls.js" defer></script>
   <script src="screen.js" defer></script>
 </head>
 <body>
@@ -17,6 +18,7 @@
       <button data-tab="nearby" class="nav-item active"><span class="nav-icon">◎</span><span>近くの端末</span><span id="peer-count" class="count">0</span></button>
       <button data-tab="transfers" class="nav-item"><span class="nav-icon">⇄</span><span>ファイル転送</span><span id="transfer-count" class="count">0</span></button>
       <button data-tab="history" class="nav-item"><span class="nav-icon">◷</span><span>メッセージ</span></button>
+      <button data-tab="calls" id="calls-nav" class="nav-item" hidden><span class="nav-icon">☎</span><span>通話</span></button>
       <button data-tab="screen" id="screen-nav" class="nav-item" hidden><span class="nav-icon">▣</span><span>画面共有</span></button>
       <button data-tab="settings" class="nav-item"><span class="nav-icon">⚙</span><span>設定</span></button>
     </nav>
@@ -27,6 +29,7 @@
     <div id="native-error" class="notice" hidden></div>
     <div id="warnings" hidden></div>
     <div id="screen-offers" class="notice" hidden></div>
+    <div id="call-offers" class="notice call-notice" hidden></div>
     <section id="view-nearby" class="view">
       <div class="page-heading"><h1>近くの端末</h1></div>
       <div class="discovery-banner"><div class="discovery-copy"><h2>両方の端末でLoCALを開く</h2><p>端末を選び、表示された6桁のコードを双方で確認してください。</p></div><button class="text-button" id="manual-open">IPアドレスで接続</button></div>
@@ -49,17 +52,23 @@
       <form id="message-form" class="composer"><label class="sr-only" for="message">メッセージ</label><textarea id="message" placeholder="メッセージを入力…" maxlength="16384" rows="3"></textarea><div class="composer-actions"><button type="button" id="paste-clipboard" class="secondary">クリップボードを貼り付け</button><button type="submit" id="send-message" class="primary">送信 ↗</button></div></form>
     </section>
     <section id="view-screen" class="view" hidden>
-      <div class="page-heading"><h1>画面共有</h1><p>Windows同士の閲覧専用機能です。音声・遠隔操作はありません。</p></div>
-      <div class="settings-card"><h2>自分の画面を共有</h2><label for="screen-peer">共有する相手</label><select id="screen-peer"></select><label for="screen-source">表示する画面</label><select id="screen-source"></select><div class="actions"><button id="screen-refresh-sources" class="secondary">画面を更新</button><button id="screen-share" class="primary">共有を申し込む</button></div><p class="muted small">相手が承認してから画面の取得を開始します。</p></div>
+      <div class="page-heading"><h1>画面共有</h1><p>Windowsの画面をWindowsまたはAndroidから閲覧できます。音声・遠隔操作はありません。</p></div>
+      <div class="settings-card" id="screen-share-panel"><h2>自分の画面を共有</h2><label for="screen-peer">共有する相手</label><select id="screen-peer"></select><label for="screen-source">表示する画面</label><select id="screen-source"></select><div class="actions"><button id="screen-refresh-sources" class="secondary">画面を更新</button><button id="screen-share" class="primary">共有を申し込む</button></div><p class="muted small">相手が承認してから画面の取得を開始します。</p></div>
       <div class="section-title"><h2>画面セッション</h2></div><div id="screen-sessions"></div>
       <div id="screen-viewer" class="settings-card" hidden><h2>受信中の画面</h2><canvas id="screen-canvas" aria-label="相手の共有画面"></canvas><div class="actions"><button id="screen-stop" class="danger-button">表示を終了</button></div></div>
+    </section>
+    <section id="view-calls" class="view" hidden>
+      <div class="page-heading"><h1>通話</h1><p>ペアリング済みの端末と、LAN内で直接つながる音声通話です。</p></div>
+      <div class="settings-card" id="call-start-panel"><h2>音声通話を開始</h2><label for="call-peer">通話する端末</label><select id="call-peer"></select><div class="actions"><button id="call-start" class="primary">電話をかける</button></div><p class="muted small">開始時にマイクの使用許可を求めます。音声はLoCALのサーバーを経由しません。</p></div>
+      <div class="settings-card call-active" id="call-active" hidden><div class="call-state"><div><h2 id="call-peer-name">—</h2><p id="call-state-text">接続中…</p></div><span id="call-duration" class="mono">00:00</span></div><audio id="call-audio" autoplay></audio><div class="actions"><button id="call-mute" class="secondary">ミュート</button><button id="call-end" class="danger-button">通話を終了</button></div></div>
+      <div class="settings-card"><h2>通話について</h2><p class="muted small">WebRTCのエコー除去・ノイズ抑制を使用します。現時点では1対1の音声のみで、電話番号やインターネット中継には対応していません。</p></div>
     </section>
     <section id="view-settings" class="view" hidden>
       <div class="page-heading"><h1>設定</h1></div>
       <div class="settings-card"><h2>この端末</h2><form id="name-form"><label for="device-name">端末の名前</label><div class="input-row"><input id="device-name" maxlength="80" placeholder="端末の名前"><button class="primary" type="submit">保存</button></div></form><label>接続用アドレス</label><div id="addresses" class="info-value">—</div><label>Device ID / 公開鍵の指紋</label><div id="fingerprint" class="mono fingerprint">—</div><p class="muted small">表示名が同じでも鍵が変わった端末は、もう一度ペアリングが必要です。</p></div>
       <div class="settings-card"><h2>信頼済みの端末</h2><div id="trusted"></div></div>
       <div class="settings-card"><h2>保存とプライバシー</h2><label>受信ファイルの保存先</label><div id="receive-dir" class="mono fingerprint"></div><p id="storage-note" class="muted small"></p><div class="settings-row"><span>メッセージ履歴</span><button id="clear-history" class="danger-button">履歴を削除</button></div></div>
-      <p class="muted small">LoCAL v<span id="version">0.2.3</span> · QUIC / TLS 1.3 · BLAKE3<br>音声・センサー・QRペアリングは今後のバージョンで対応予定です。</p>
+      <p class="muted small">LoCAL v<span id="version">0.3.0</span> · QUIC / TLS 1.3 · BLAKE3<br>センサー・QRペアリングは今後のバージョンで対応予定です。</p>
     </section>
   </main>
   <dialog id="manual-dialog"><form id="manual-form"><div class="dialog-heading"><h2>アドレスで接続</h2><button type="button" data-close="manual-dialog" class="icon-button" aria-label="閉じる">×</button></div><p>相手のLoCALの「設定」に表示されたアドレスを入力してください。</p><label for="manual-address">IPアドレス : ポート</label><input id="manual-address" placeholder="192.168.1.20:53319" inputmode="url" required><p class="muted small">両方の端末を同じWi-Fiに接続してください。</p><button type="submit" class="primary full">接続する ↗</button></form></dialog>

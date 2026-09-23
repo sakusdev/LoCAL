@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("target")
 parser.add_argument("platform")
 args = parser.parse_args()
-version = "0.2.3"
+version = "0.3.0"
 root = pathlib.Path(__file__).resolve().parents[1]
 build = root / "target" / args.target / "release"
 out = root / "dist"

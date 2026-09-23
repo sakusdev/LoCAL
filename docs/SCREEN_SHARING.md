@@ -104,7 +104,7 @@ Platform capture belongs outside `local-core`. Each backend implements the `loca
 
 Preferred path: Windows Graphics Capture with hardware H.264 through Media Foundation where available. Desktop Duplication is a fallback for older or unusual systems.
 
-The v0.2 preview currently captures displays through Windows Graphics Capture and encodes through a conservative OpenH264 software path. Windows WebView2 decodes Annex B H.264 only after runtime codec probing. The viewer requires explicit acceptance and the sender starts capture after that acceptance. Hardware encoding and two-device visual performance testing remain future work.
+The v0.3 preview captures displays through Windows Graphics Capture and encodes through a conservative OpenH264 software path. Windows WebView2 and Android WebView decode Annex B H.264 only after runtime codec probing. The viewer requires explicit acceptance and the sender starts capture after that acceptance. Android capture, hardware encoding and two-device visual performance testing remain future work.
 
 ### macOS
 

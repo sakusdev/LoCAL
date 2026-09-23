@@ -13,11 +13,11 @@ use protocol::{Hello, Reply, Request};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     net::SocketAddr,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -87,6 +87,16 @@ pub struct Transfer {
     pub timestamp: i64,
 }
 
+#[derive(Clone, Serialize)]
+pub struct AudioSignalEvent {
+    pub sequence: u64,
+    pub call_id: String,
+    pub peer_id: String,
+    pub kind: String,
+    pub data: String,
+    pub timestamp: i64,
+}
+
 struct Cancel {
     flag: AtomicBool,
     wake: Notify,
@@ -148,6 +158,9 @@ pub struct Node {
     decisions: Mutex<HashMap<String, oneshot::Sender<bool>>>,
     cancellations: Mutex<HashMap<String, Arc<Cancel>>>,
     screen_runtime: screen::Runtime,
+    audio_enabled: AtomicBool,
+    audio_signals: Mutex<VecDeque<AudioSignalEvent>>,
+    audio_sequence: AtomicU64,
     warnings: Mutex<Vec<String>>,
     stopping: AtomicBool,
     shutdown: Notify,
@@ -193,6 +206,9 @@ impl Node {
             decisions: Mutex::new(HashMap::new()),
             cancellations: Mutex::new(HashMap::new()),
             screen_runtime: screen::Runtime::new(),
+            audio_enabled: AtomicBool::new(false),
+            audio_signals: Mutex::new(VecDeque::with_capacity(256)),
+            audio_sequence: AtomicU64::new(0),
             warnings: Mutex::new(vec![]),
             stopping: AtomicBool::new(false),
             shutdown: Notify::new(),
@@ -233,7 +249,10 @@ impl Node {
         Ok(self.endpoint.local_addr()?)
     }
     fn hello(&self) -> Hello {
-        let (capabilities, screen) = self.screen_advertisement();
+        let (mut capabilities, screen) = self.screen_advertisement();
+        if self.audio_enabled.load(Ordering::SeqCst) {
+            capabilities.push(protocol::CAP_AUDIO.into());
+        }
         Hello {
             version: protocol::VERSION,
             id: self.id.clone(),
@@ -477,6 +496,10 @@ impl Node {
                             n.receive_screen_signal(&s, &id, signal)?;
                             protocol::write(&mut send, &Reply::ok(0)).await?;
                         }
+                        Request::AudioSignal { call_id, kind, data } => {
+                            n.receive_audio_signal(&s, call_id, kind, data)?;
+                            protocol::write(&mut send, &Reply::ok(0)).await?;
+                        }
                     }
                     Ok::<_, anyhow::Error>(())
                 }
@@ -523,6 +546,92 @@ impl Node {
             .clone()
             .context("Peer does not advertise screen capabilities")
     }
+    pub fn set_audio_enabled(&self, enabled: bool) -> Result<()> {
+        if !self.sessions.lock().unwrap().is_empty() {
+            bail!("Disconnect peers before changing audio call availability");
+        }
+        self.audio_enabled.store(enabled, Ordering::SeqCst);
+        Ok(())
+    }
+    fn validate_audio_signal(call_id: &str, kind: &str, data: &str) -> Result<()> {
+        if uuid::Uuid::parse_str(call_id).is_err()
+            || !matches!(kind, "offer" | "answer" | "candidate" | "reject" | "end")
+            || data.len() > protocol::MAX_AUDIO_SIGNAL
+        {
+            bail!("Invalid audio call signal");
+        }
+        if matches!(kind, "offer" | "answer" | "candidate") {
+            let value: Value = serde_json::from_str(data).context("Invalid WebRTC signal")?;
+            if !value.is_object() {
+                bail!("Invalid WebRTC signal");
+            }
+        } else if !data.is_empty() {
+            bail!("Call control signal must not contain data");
+        }
+        Ok(())
+    }
+    fn receive_audio_signal(
+        &self,
+        session: &Session,
+        call_id: String,
+        kind: String,
+        data: String,
+    ) -> Result<()> {
+        if !session.ready() || !session.supports(protocol::CAP_AUDIO) {
+            bail!("Peer does not support audio calls");
+        }
+        Self::validate_audio_signal(&call_id, &kind, &data)?;
+        let sequence = self.audio_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut signals = self.audio_signals.lock().unwrap();
+        if signals.len() >= 256 {
+            signals.pop_front();
+        }
+        signals.push_back(AudioSignalEvent {
+            sequence,
+            call_id,
+            peer_id: session.peer.id.clone(),
+            kind,
+            data,
+            timestamp: now(),
+        });
+        Ok(())
+    }
+    pub async fn send_audio_signal(
+        &self,
+        peer_id: &str,
+        call_id: &str,
+        kind: &str,
+        data: &str,
+    ) -> Result<()> {
+        Self::validate_audio_signal(call_id, kind, data)?;
+        let session = self.session(peer_id)?;
+        if !session.ready() || !session.supports(protocol::CAP_AUDIO) {
+            bail!("Peer does not support audio calls");
+        }
+        let (mut send, mut recv) = session.conn.open_bi().await?;
+        protocol::write(
+            &mut send,
+            &Request::AudioSignal {
+                call_id: call_id.into(),
+                kind: kind.into(),
+                data: data.into(),
+            },
+        )
+        .await?;
+        send.finish()?;
+        protocol::read::<Reply>(&mut recv).await?.check()
+    }
+    fn audio_signals_after(&self, after: u64) -> Value {
+        let signals = self.audio_signals.lock().unwrap();
+        let events: Vec<_> = signals
+            .iter()
+            .filter(|event| event.sequence > after)
+            .take(128)
+            .cloned()
+            .collect();
+        let latest = events.last().map_or(after, |event| event.sequence);
+        json!({"events":events,"latest":latest})
+    }
     async fn send_confirmation(&self, s: Arc<Session>) -> Result<()> {
         let (mut send, mut recv) = s.conn.open_bi().await?;
         protocol::write(&mut send, &Request::Confirm).await?;
@@ -544,6 +653,10 @@ impl Node {
     }
     pub fn disconnect(&self, id: &str) {
         self.screen_runtime.peer_closed(id);
+        self.audio_signals
+            .lock()
+            .unwrap()
+            .retain(|event| event.peer_id != id);
         if let Some(s) = self.sessions.lock().unwrap().remove(id) {
             s.conn.close(0u32.into(), b"disconnected locally");
         }
@@ -663,12 +776,29 @@ impl Node {
         };
         match field("op")? {
             "snapshot" => self.snapshot(),
+            "enable_audio" => {
+                self.set_audio_enabled(true)?;
+                Ok(json!({"enabled":true}))
+            }
             "received_files" => {
                 self.received_files(
                     usize::try_from(value.get("offset").and_then(Value::as_u64).unwrap_or(0))
                         .unwrap_or(usize::MAX),
                 )
                 .await
+            }
+            "audio_signals" => Ok(self.audio_signals_after(
+                value.get("after").and_then(Value::as_u64).unwrap_or(0),
+            )),
+            "send_audio_signal" => {
+                self.send_audio_signal(
+                    field("peer_id")?,
+                    field("call_id")?,
+                    field("kind")?,
+                    value.get("data").and_then(Value::as_str).unwrap_or(""),
+                )
+                .await?;
+                Ok(json!({}))
             }
             "connect" => Ok(json!({
                 "id":self.connect(field("address")?,value.get("peer_id").and_then(Value::as_str)).await?

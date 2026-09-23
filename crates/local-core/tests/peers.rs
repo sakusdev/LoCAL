@@ -173,6 +173,51 @@ async fn identity_pin_reconnect_and_restart_persistence() {
     b.stop();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn paired_peers_exchange_private_audio_call_signals() {
+    let temp = tempfile::tempdir().unwrap();
+    let caller = start(&temp.path().join("caller"), "Caller").await;
+    let receiver = start(&temp.path().join("receiver"), "Receiver").await;
+    caller.set_audio_enabled(true).unwrap();
+    receiver.set_audio_enabled(true).unwrap();
+    pair(&caller, &receiver).await;
+    let call_id = uuid::Uuid::new_v4().to_string();
+    caller
+        .send_audio_signal(
+            &receiver.id,
+            &call_id,
+            "offer",
+            r#"{"type":"offer","sdp":"test-sdp"}"#,
+        )
+        .await
+        .unwrap();
+    let events = receiver
+        .command(json!({"op":"audio_signals","after":0}))
+        .await
+        .unwrap();
+    assert_eq!(events["events"][0]["call_id"], call_id);
+    assert_eq!(events["events"][0]["peer_id"], caller.id);
+    assert_eq!(events["events"][0]["kind"], "offer");
+    let sequence = events["latest"].as_u64().unwrap();
+    assert!(receiver
+        .command(json!({"op":"audio_signals","after":sequence}))
+        .await
+        .unwrap()["events"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(caller
+        .send_audio_signal(&receiver.id, "not-a-uuid", "offer", "{}")
+        .await
+        .is_err());
+    assert!(caller
+        .send_audio_signal(&receiver.id, &call_id, "offer", "not-json")
+        .await
+        .is_err());
+    caller.stop();
+    receiver.stop();
+}
+
 #[test]
 fn traversal_reserved_names_and_hashes_are_rejected() {
     use local_core::protocol::*;

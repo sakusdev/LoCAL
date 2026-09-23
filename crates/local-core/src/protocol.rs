@@ -5,6 +5,7 @@ use std::collections::HashSet;
 pub const VERSION: u8 = 1;
 pub const MAX_FRAME: usize = 96 * 1024;
 pub const MAX_TEXT: usize = 16 * 1024;
+pub const MAX_AUDIO_SIGNAL: usize = 64 * 1024;
 pub const MAX_FILE: u64 = 20 * 1024 * 1024 * 1024;
 pub const CHUNK: usize = 1024 * 1024;
 pub const MAX_CAPABILITIES: usize = 32;
@@ -70,6 +71,11 @@ pub enum Request {
     ScreenSignal {
         id: String,
         signal: ScreenSignal,
+    },
+    AudioSignal {
+        call_id: String,
+        kind: String,
+        data: String,
     },
 }
 

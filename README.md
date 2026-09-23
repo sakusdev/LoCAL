@@ -12,7 +12,7 @@ Rust core · QUIC / TLS 1.3 · Android · Windows · Linux · macOS · CLI
 
 Pixel 7aは **Android arm64-v8a APK**、一般的なPCは **Windows x64 setup.exe** を選んでください。
 
-| 機能 | v0.2.3 |
+| 機能 | v0.3.0 |
 | --- | --- |
 | 自動発見 / IP接続 | IPv4 UDP Broadcast + 補助Multicast |
 | 鍵 / ペアリング | Ed25519 + TLS exporterの6桁コード、両側確認 |
@@ -20,16 +20,17 @@ Pixel 7aは **Android arm64-v8a APK**、一般的なPCは **Windows x64 setup.ex
 | ファイル | 受信承認、最大20GiB、キャンセル、再送で再開、BLAKE3検証 |
 | 複数ファイル | Android / デスクトップで最大8件を一度に選択して送信 |
 | クリップボード | 手動のテキスト共有 |
+| 音声通話 | 1対1 WebRTC、着信承認、ミュート、LAN内直接接続 |
 | IP接続 | 設定に表示された接続用アドレスを個別にコピー |
-| Android | JNIコア、ファイル選択・書き出し、接続通知 |
+| Android | JNIコア、ファイル選択・書き出し、音声通話、画面共有の閲覧、接続通知 |
 | GUI / CLI | 明るい実用画面の日本語UI、PC/スマホ、CLI対話モード + JSON IPC |
-| 画面共有プレビュー | Windows同士の閲覧専用H.264、受信側の承認・停止 |
+| 画面共有プレビュー | WindowsからWindows / Androidへの閲覧専用H.264、受信側の承認・停止 |
 
 ## 次の段階
 
 LoCALは単なるLAN内ファイル共有ではなく、端末がローカル機能を安全に公開できる **Local Connectivity & Access Layer** を目指します。将来のリソースは `lm://<device-id>/<resource>` で表現し、たとえば `screen/main`、`audio/output`、`sensors/gyro` のように扱います。
 
-Windows同士の閲覧専用画面共有をプレビューとして実装しています。受信側のWebView2がH.264 Annex Bを復号できるときに使用でき、送信側の画面は受信側の承認後に取得します。Windows実機2台での画質・遅延検証は今後の課題です。続いてQRペアリング、音声、センサー、mDNS / IPv6を実装します。画面共有のシステム音声・リモート操作は別権限とし、マルチホップと画像クリップボードはその後の段階です。
+ペアリング済み端末間の1対1音声通話を実装しています。呼制御は既存のQUIC/TLS接続、音声はWebRTCのDTLS-SRTPでLAN内を直接流れます。画面共有はWindowsからWindows / Androidへの閲覧専用プレビューです。送信側の画面は受信側の承認後に取得します。実機間の音質・画質・遅延検証は今後の課題です。続いてAndroid画面送信、QRペアリング、センサー、mDNS / IPv6を実装します。画面共有のシステム音声・リモート操作は別権限です。
 
 APKはビルドごとの開発署名付き、Windows/macOSは商用コード署名なしのプレビューです。APKの更新には再インストールが必要です。
 

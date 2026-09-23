@@ -89,7 +89,7 @@ function setHtml(id, html) {
 
 function tab(name) {
   activeTab = name;
-  const labels = { nearby:'近くの端末', transfers:'ファイル転送', history:'メッセージ', screen:'画面共有', settings:'設定' };
+  const labels = { nearby:'近くの端末', transfers:'ファイル転送', history:'メッセージ', calls:'通話', screen:'画面共有', settings:'設定' };
   document.querySelectorAll('.view').forEach((view) => { view.hidden = view.id !== `view-${name}`; });
   document.querySelectorAll('[data-tab]').forEach((button) => { button.classList.toggle('active', button.dataset.tab === name); button.setAttribute('aria-current', button.dataset.tab === name ? 'page' : 'false'); });
   $('page-name').textContent = labels[name];
@@ -128,7 +128,7 @@ function renderPeers() {
   setHtml('peers', snapshot.peers.length ? snapshot.peers.map((peer) => {
     let controls;
     if (peer.ready) {
-      controls = `<div class="peer-status">● ペアリング済み · 暗号化接続</div><div class="actions">${button('ファイルを送る ↗','file',peer.id,'primary')}${button('メッセージ','chat',peer.id)}${button('切断','disconnect',peer.id)}</div>`;
+      controls = `<div class="peer-status">● ペアリング済み · 暗号化接続</div><div class="actions">${button('ファイルを送る ↗','file',peer.id,'primary')}${button('メッセージ','chat',peer.id)}${peer.capabilities?.includes('audio') ? button('通話','call',peer.id) : ''}${button('切断','disconnect',peer.id)}</div>`;
     } else if (peer.connected && peer.code) {
       controls = `<div class="pair-box"><p>相手の画面と同じコードですか？</p><div class="pair-code">${escapeHtml(peer.code)}</div>${peer.local_confirmed ? '<p>相手の確認を待っています…</p>' : button('一致しています','pair',peer.id,'primary full')}<small>相手の画面を直接確認してください。コードは2分で失効します。</small></div>${button('接続を取り消す','disconnect',peer.id)}`;
     } else controls = `<div class="peer-status">${peer.trusted ? '◇ 信頼済みの端末' : '○ 接続できます'}</div>${button(peer.trusted ? 'もう一度つなぐ ↗' : 'ペアリングする ↗','connect',peer.id,'primary full')}`;

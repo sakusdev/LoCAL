@@ -1,14 +1,15 @@
 'use strict';
 
-// Loaded after app.js. Android keeps its existing text and file UI unchanged.
 (() => {
-  if (!desktop || !navigator.userAgent.includes('Windows')) return;
+  const windowsSource = desktop && navigator.userAgent.includes('Windows');
+  if (!windowsSource && !android) return;
 
   let supported = false;
   let sources = [];
   let viewerId = '';
   let decoder = null;
   let loadingSources = false;
+  let androidPolling = false;
   const config = {codec:'avc1.42E01F',codedWidth:1280,codedHeight:720,avc:{format:'annexb'}};
 
   function closeViewer() {
@@ -16,6 +17,32 @@
     decoder = null;
     viewerId = '';
     $('screen-viewer').hidden = true;
+  }
+
+  function decodeFrame(payload) {
+    if (!decoder || decoder.state !== 'configured') return;
+    try {
+      if (!payload.keyframe && decoder.decodeQueueSize > 4) return;
+      const data = Uint8Array.from(atob(payload.data),(char) => char.charCodeAt(0));
+      decoder.decode(new EncodedVideoChunk({type:payload.keyframe ? 'key' : 'delta',timestamp:payload.timestamp_us,data}));
+    } catch (error) { toast('画面データを表示できません: ' + error.message,true); }
+  }
+
+  async function pollAndroidFrames(id) {
+    if (!android || androidPolling) return;
+    androidPolling = true;
+    try {
+      while (viewerId === id && decoder?.state === 'configured') {
+        const result = await command({op:'poll_screen_frame',id});
+        if (viewerId !== id || result.ended) break;
+        if (result.frame) decodeFrame(result.frame);
+      }
+    } catch (error) {
+      if (viewerId === id) toast('画面の受信が終了しました: ' + error.message,true);
+    } finally {
+      androidPolling = false;
+      if (viewerId === id) closeViewer();
+    }
   }
 
   function renderOffers() {
@@ -52,6 +79,11 @@
 
   async function refreshSources() {
     if (!supported || loadingSources) return;
+    if (!windowsSource) {
+      sources = [];
+      $('screen-share-panel').hidden = true;
+      return;
+    }
     loadingSources = true;
     try {
       sources = (await command({op:'screen_sources'})).sources;
@@ -86,6 +118,7 @@
     catch (error) { closeViewer(); throw error; }
     $('screen-viewer').hidden = false;
     tab('screen');
+    pollAndroidFrames(id);
   }
 
   document.addEventListener('click',(event) => {
@@ -129,17 +162,14 @@
   async function boot() {
     if (typeof VideoDecoder !== 'function' || typeof EncodedVideoChunk !== 'function' ||
         !(await VideoDecoder.isConfigSupported(config)).supported) return;
-    await window.__TAURI__.event.listen('local-screen-frame',({payload}) => {
-      if (payload.id !== viewerId || !decoder || decoder.state !== 'configured') return;
-      try {
-        const data = Uint8Array.from(atob(payload.data),(char) => char.charCodeAt(0));
-        decoder.decode(new EncodedVideoChunk({type:payload.keyframe ? 'key' : 'delta',
-          timestamp:payload.timestamp_us,data}));
-      } catch (error) { toast('画面データを表示できません: ' + error.message,true); }
-    });
-    await window.__TAURI__.event.listen('local-screen-ended',({payload}) => {
-      if (payload.id === viewerId) closeViewer();
-    });
+    if (desktop) {
+      await window.__TAURI__.event.listen('local-screen-frame',({payload}) => {
+        if (payload.id === viewerId) decodeFrame(payload);
+      });
+      await window.__TAURI__.event.listen('local-screen-ended',({payload}) => {
+        if (payload.id === viewerId) closeViewer();
+      });
+    }
     await command({op:'enable_screen_view'});
     supported = true;
     $('screen-nav').hidden = false;

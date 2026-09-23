@@ -18,7 +18,8 @@ public final class MainActivity extends Activity {
     private WebView web;
     private String pickerId, pickerPeer, exportId;
     private File exportSource;
-    private static final int PICK = 101, EXPORT = 102;
+    private PermissionRequest microphoneRequest;
+    private static final int PICK = 101, EXPORT = 102, MICROPHONE = 104;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -34,6 +35,25 @@ public final class MainActivity extends Activity {
         web.getSettings().setAllowContentAccess(false);
         web.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         web.addJavascriptInterface(new Bridge(), "LocalNative");
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> {
+                    Uri origin = request.getOrigin();
+                    boolean local = origin != null && "https".equals(origin.getScheme()) && "local.app".equals(origin.getHost());
+                    boolean audioOnly = request.getResources().length == 1 && PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(request.getResources()[0]);
+                    if (!local || !audioOnly || microphoneRequest != null) { request.deny(); return; }
+                    if (Build.VERSION.SDK_INT < 23 || checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                    } else {
+                        microphoneRequest = request;
+                        requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, MICROPHONE);
+                    }
+                });
+            }
+            @Override public void onPermissionRequestCanceled(PermissionRequest request) {
+                if (microphoneRequest == request) { microphoneRequest = null; }
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) { return true; }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
@@ -141,10 +161,20 @@ public final class MainActivity extends Activity {
             });
         }
     }
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != MICROPHONE) { return; }
+        PermissionRequest request = microphoneRequest;
+        microphoneRequest = null;
+        if (request == null) { return; }
+        if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+        } else { request.deny(); }
+    }
     private static void copy(InputStream input, OutputStream output, long limit) throws IOException {
         if (input == null || output == null) { throw new IOException("Cannot open document"); }
         byte[] buffer = new byte[1024 * 1024]; long total = 0; int n;
         while ((n = input.read(buffer)) != -1) { total += n; if (total > limit) { throw new IOException("File exceeds 20 GiB"); } output.write(buffer, 0, n); }
     }
-    @Override protected void onDestroy() { if (web != null) { web.removeJavascriptInterface("LocalNative"); web.destroy(); web = null; } super.onDestroy(); }
+    @Override protected void onDestroy() { if (microphoneRequest != null) { microphoneRequest.deny(); microphoneRequest = null; } if (web != null) { web.removeJavascriptInterface("LocalNative"); web.destroy(); web = null; } super.onDestroy(); }
 }
