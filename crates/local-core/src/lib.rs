@@ -619,7 +619,8 @@ impl Node {
         )
         .await?;
         send.finish()?;
-        protocol::read::<Reply>(&mut recv).await?.check()
+        protocol::read::<Reply>(&mut recv).await?.check()?;
+        Ok(())
     }
     fn audio_signals_after(&self, after: u64) -> Value {
         let signals = self.audio_signals.lock().unwrap();
