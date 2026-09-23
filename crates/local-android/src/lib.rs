@@ -1,9 +1,9 @@
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use jni::{
     objects::{JClass, JString},
     sys::jstring,
     JNIEnv,
 };
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use local_core::{
     protocol::{ScreenCapabilities, ScreenCodec, ScreenMediaCapabilities},
     Config, Node, ScreenVideoReceiver,

@@ -496,7 +496,11 @@ impl Node {
                             n.receive_screen_signal(&s, &id, signal)?;
                             protocol::write(&mut send, &Reply::ok(0)).await?;
                         }
-                        Request::AudioSignal { call_id, kind, data } => {
+                        Request::AudioSignal {
+                            call_id,
+                            kind,
+                            data,
+                        } => {
                             n.receive_audio_signal(&s, call_id, kind, data)?;
                             protocol::write(&mut send, &Reply::ok(0)).await?;
                         }
@@ -788,9 +792,10 @@ impl Node {
                 )
                 .await
             }
-            "audio_signals" => Ok(self.audio_signals_after(
-                value.get("after").and_then(Value::as_u64).unwrap_or(0),
-            )),
+            "audio_signals" => {
+                Ok(self
+                    .audio_signals_after(value.get("after").and_then(Value::as_u64).unwrap_or(0)))
+            }
             "send_audio_signal" => {
                 self.send_audio_signal(
                     field("peer_id")?,
