@@ -169,7 +169,7 @@ pub extern "system" fn Java_org_sakus_local_Native_command(
                 let width = value.get("width").and_then(Value::as_u64).ok_or("Missing width")? as u32;
                 let height = value.get("height").and_then(Value::as_u64).ok_or("Missing height")? as u32;
                 let fps = value.get("fps").and_then(Value::as_u64).unwrap_or(15).clamp(1, 30) as u16;
-                let id = uuid::Uuid::new_v4().to_string();
+                let id = value.get("id").and_then(Value::as_str).ok_or("Missing screen session id")?.to_owned();
                 let offer = ScreenOffer {
                     id: id.clone(),
                     resource: "screen/display/display-0".into(),
