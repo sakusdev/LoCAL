@@ -149,6 +149,7 @@ public final class MainActivity extends Activity {
                     int fps = Math.max(1, Math.min(30, pending.optInt("max_fps", 15)));
                     JSONObject nativeRequest = new JSONObject()
                         .put("op", "android_share_screen")
+                        .put("id", UUID.randomUUID().toString())
                         .put("peer_id", pending.getString("peer_id"))
                         .put("width", size[0]).put("height", size[1]).put("fps", fps);
                     JSONObject response = new JSONObject(Native.command(nativeRequest.toString()));
