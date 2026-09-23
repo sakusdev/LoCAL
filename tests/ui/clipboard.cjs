@@ -22,7 +22,7 @@ const server = http.createServer((req,res) => {
     await page.addInitScript(() => {
       const a='b'.repeat(64),b='c'.repeat(64);
       window.clipboardValue='before-enable';window.clipboardRevision=0;window.clipboardCalls=[];
-      window.clipboardState={version:'0.4.0',device:{id:'a'.repeat(64),name:'Desktop',port:53319,addresses:[]},
+      window.clipboardState={version:'0.4.1',device:{id:'a'.repeat(64),name:'Desktop',port:53319,addresses:[]},
         peers:[a,b].map((id,index)=>({id,name:index?'Tablet':'Phone',address:'10.0.0.'+(index+2)+':53319',ready:true,capabilities:['text','clipboard']})),
         trusted:[],messages:[{id:'old',peer_id:a,direction:'in',channel:'mesh.clipboard',text:'old-history',timestamp:1}],transfers:[],warnings:[],receive_dir:'/tmp',screen_sessions:[]};
       window.LocalNative={invoke(callId,body){

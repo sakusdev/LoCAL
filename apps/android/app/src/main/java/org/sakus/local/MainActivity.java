@@ -20,6 +20,7 @@ public final class MainActivity extends Activity {
     private String pickerId, pickerPeer, exportId;
     private File exportSource;
     private PermissionRequest microphoneRequest;
+    private String microphoneCallId;
     private ClipboardManager clipboardManager;
     private ClipboardManager.OnPrimaryClipChangedListener clipboardListener;
     private volatile long clipboardRevision;
@@ -110,6 +111,18 @@ public final class MainActivity extends Activity {
                         });
                     } else if ("clipboard_revision".equals(op)) {
                         success(id, clipboardRevision);
+                    } else if ("prepare_microphone".equals(op)) {
+                        runOnUiThread(() -> {
+                            if (Build.VERSION.SDK_INT < 23 || checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                success(id, true);
+                            } else if (microphoneCallId != null || microphoneRequest != null) {
+                                fail(id, "マイクの使用許可を確認中です");
+                            } else {
+                                microphoneCallId = id;
+                                try { requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, MICROPHONE); }
+                                catch (Throwable error) { microphoneCallId = null; fail(id, error.toString()); }
+                            }
+                        });
                     } else if ("read_clipboard".equals(op) || "write_clipboard".equals(op)) {
                         runOnUiThread(() -> {
                             if ("write_clipboard".equals(op)) { clipboardManager.setPrimaryClip(ClipData.newPlainText("LoCAL", request.optString("text"))); success(id, ""); }
@@ -237,8 +250,14 @@ public final class MainActivity extends Activity {
         if (requestCode != MICROPHONE) { return; }
         PermissionRequest request = microphoneRequest;
         microphoneRequest = null;
+        String callId = microphoneCallId;
+        microphoneCallId = null;
+        boolean granted = results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        if (callId != null) {
+            if (granted) { success(callId, true); } else { fail(callId, "マイクの使用が許可されていません"); }
+        }
         if (request == null) { return; }
-        if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        if (granted) {
             request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
         } else { request.deny(); }
     }
@@ -247,5 +266,5 @@ public final class MainActivity extends Activity {
         byte[] buffer = new byte[1024 * 1024]; long total = 0; int n;
         while ((n = input.read(buffer)) != -1) { total += n; if (total > limit) { throw new IOException("File exceeds 20 GiB"); } output.write(buffer, 0, n); }
     }
-    @Override protected void onDestroy() { if (microphoneRequest != null) { microphoneRequest.deny(); microphoneRequest = null; } if (clipboardManager != null && clipboardListener != null) { clipboardManager.removePrimaryClipChangedListener(clipboardListener); } if (web != null) { web.removeJavascriptInterface("LocalNative"); web.destroy(); web = null; } super.onDestroy(); }
+    @Override protected void onDestroy() { if (microphoneRequest != null) { microphoneRequest.deny(); microphoneRequest = null; } if (microphoneCallId != null) { fail(microphoneCallId, "マイクの使用許可が中断されました"); microphoneCallId = null; } if (clipboardManager != null && clipboardListener != null) { clipboardManager.removePrimaryClipChangedListener(clipboardListener); } if (web != null) { web.removeJavascriptInterface("LocalNative"); web.destroy(); web = null; } super.onDestroy(); }
 }
