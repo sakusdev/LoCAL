@@ -19,6 +19,9 @@ public final class ScreenShareService extends Service {
     private MediaCodec encoder;
     private Thread drainThread;
     private volatile boolean running;
+    private final MediaProjection.Callback projectionCallback = new MediaProjection.Callback() {
+        @Override public void onStop() { running = false; stopSelf(); }
+    };
     private String sessionId;
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -47,6 +50,7 @@ public final class ScreenShareService extends Service {
         try {
             MediaProjectionManager mpm = getSystemService(MediaProjectionManager.class);
             projection = mpm.getMediaProjection(resultCode, data);
+            projection.registerCallback(projectionCallback, new Handler(Looper.getMainLooper()));
             MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height);
             format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
             format.setInteger(MediaFormat.KEY_BIT_RATE, Math.max(1_500_000, Math.min(6_000_000, width * height * fps / 3)));
@@ -132,7 +136,10 @@ public final class ScreenShareService extends Service {
     @Override public void onDestroy() {
         running = false;
         if (display != null) { display.release(); display = null; }
-        if (projection != null) { projection.stop(); projection = null; }
+        if (projection != null) {
+            try { projection.unregisterCallback(projectionCallback); } catch (Throwable ignored) {}
+            projection.stop(); projection = null;
+        }
         if (encoder != null) {
             try { encoder.stop(); } catch (Throwable ignored) {}
             try { encoder.release(); } catch (Throwable ignored) {}
