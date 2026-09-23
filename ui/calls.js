@@ -62,7 +62,17 @@
   }
 
   async function microphone() {
-    return navigator.mediaDevices.getUserMedia({video:false,audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+    if (android) await command({op:'prepare_microphone'});
+    try {
+      return await navigator.mediaDevices.getUserMedia({video:false,audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+    } catch (error) {
+      if (!android || error.name !== 'NotReadableError') throw error;
+      try { return await navigator.mediaDevices.getUserMedia({video:false,audio:true}); }
+      catch (fallbackError) {
+        if (fallbackError.name === 'NotReadableError') throw new Error('マイクを開始できません。Androidのマイク使用設定と、他の通話・録音アプリを確認してください。');
+        throw fallbackError;
+      }
+    }
   }
 
   async function makeConnection(callId, peerId, state) {

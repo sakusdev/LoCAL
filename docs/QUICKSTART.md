@@ -15,7 +15,7 @@ GitHub Releasesから端末に合うファイルを選びます。
 | Mac Apple Silicon | `macos-arm64.dmg` |
 | Mac Intel | `macos-x64.dmg` |
 
-実際のファイル名には `LoCAL-0.4.0-` が付きます。署名鍵を設定したAndroidビルドでは末尾が `release.apk` になります。
+実際のファイル名には `LoCAL-0.4.1-` が付きます。署名鍵を設定したAndroidビルドでは末尾が `release.apk` になります。
 
 Android 8以降、Windows 10/11（WebView2）、Linux x64はUbuntu 22.04以降、Linux ARM64はUbuntu 24.04相当、macOS 11以降を対象としています。WindowsセットアップはWebView2がなければダウンロードします。アプリ本体のLAN通信はインターネット不要です。
 

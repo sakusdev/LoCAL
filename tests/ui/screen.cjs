@@ -24,7 +24,7 @@ const server = http.createServer((req,res) => {
       const offers={};
       offers[incoming]={id:incoming,peer_id:peer,direction:'in',status:'offered',error:'',
         offer:{id:incoming,resource:'screen/display/display-1',codec:'h264',width:640,height:360,fps:15}};
-      const state={version:'0.4.0',device:{id:local,name:'My PC',port:53319,addresses:[],
+      const state={version:'0.4.1',device:{id:local,name:'My PC',port:53319,addresses:[],
         screen:{decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}},
         peers:[{id:peer,name:'<img src=x onerror=alert(1)> peer',address:'10.1.1.2:53319',
           ready:true,screen:{decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}}],
@@ -84,7 +84,7 @@ const server = http.createServer((req,res) => {
     const androidErrors=[];androidPage.on('pageerror',error=>androidErrors.push(error.message));
     await androidPage.addInitScript(() => {
       const peer='b'.repeat(64),local='a'.repeat(64),id='52c26a8a-25d8-4751-802e-57e8bfe92732';
-      const state={version:'0.4.0',device:{id:local,name:'Phone',port:53319,addresses:[]},peers:[{id:peer,name:'Windows PC',address:'10.1.1.2:53319',ready:true,screen:{encode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30},decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/tmp',screen_sessions:[{id,peer_id:peer,direction:'in',status:'active',error:'',offer:{id,resource:'screen/display/display-1',codec:'h264',width:640,height:360,fps:15}}]};
+      const state={version:'0.4.1',device:{id:local,name:'Phone',port:53319,addresses:[]},peers:[{id:peer,name:'Windows PC',address:'10.1.1.2:53319',ready:true,screen:{encode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30},decode:{codecs:['h264'],max_width:1920,max_height:1080,max_fps:30}}}],trusted:[],messages:[],transfers:[],warnings:[],receive_dir:'/tmp',screen_sessions:[{id,peer_id:peer,direction:'in',status:'active',error:'',offer:{id,resource:'screen/display/display-1',codec:'h264',width:640,height:360,fps:15}}]};
       window.androidDecoded=[];let polled=false;
       class MockVideoDecoder {
         static async isConfigSupported(){return {supported:true};}

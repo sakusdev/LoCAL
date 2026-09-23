@@ -21,8 +21,8 @@ const server = http.createServer((req,res) => {
     const errors=[]; page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(() => {
       const local='a'.repeat(64),peer='b'.repeat(64);
-      const state={version:'0.4.0',device:{id:local,name:'PC',port:53319,addresses:['192.168.1.10:53319']},peers:[{id:peer,name:'Phone',address:'192.168.1.20:53319',connected:true,trusted:true,ready:true,capabilities:['text','file','clipboard','audio']}],trusted:[],messages:[],transfers:[],screen_sessions:[],warnings:[],receive_dir:'/tmp'};
-      let sequence=0; const incoming=[]; window.sentSignals=[]; window.testTracks=[]; window.testPcs=[];
+      const state={version:'0.4.1',device:{id:local,name:'PC',port:53319,addresses:['192.168.1.10:53319']},peers:[{id:peer,name:'Phone',address:'192.168.1.20:53319',connected:true,trusted:true,ready:true,capabilities:['text','file','clipboard','audio']}],trusted:[],messages:[],transfers:[],screen_sessions:[],warnings:[],receive_dir:'/tmp'};
+      let sequence=0; const incoming=[]; window.sentSignals=[]; window.testTracks=[]; window.testPcs=[]; window.microphoneCalls=[]; window.prepared=false;
       const description=(type,sdp)=>({type,sdp,toJSON(){return {type,sdp};}});
       class FakePeerConnection {
         constructor(){this.connectionState='new';this.remoteDescription=null;this.localDescription=null;this.candidates=[];window.testPcs.push(this);}
@@ -36,16 +36,20 @@ const server = http.createServer((req,res) => {
       }
       window.RTCPeerConnection=FakePeerConnection;
       window.MediaStream=class { constructor(tracks){this.tracks=tracks;} };
-      Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:async()=>{
+      Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:async(constraints)=>{
+        assertPrepared(); window.microphoneCalls.push(constraints);
+        if (window.microphoneCalls.length===1) throw new DOMException('Could not start audio source','NotReadableError');
         const track={enabled:true,stopped:false,stop(){this.stopped=true;}};window.testTracks.push(track);
         return {getTracks:()=>[track],getAudioTracks:()=>[track]};
       }}});
+      function assertPrepared(){if(!window.prepared)throw new Error('Android microphone permission must be prepared first');}
       window.queueSignal=(kind,data,callId='11111111-1111-4111-8111-111111111111')=>incoming.push({sequence:++sequence,call_id:callId,peer_id:peer,kind,data:data ? JSON.stringify(data) : '',timestamp:Date.now()});
       window.LocalNative={invoke(id,body){
         const request=JSON.parse(body); let data={};
         if(request.op==='snapshot') data=state;
         else if(request.op==='received_files') data={files:[],total:0,offset:0,limit:50};
         else if(request.op==='audio_signals') { const events=incoming.filter(event=>event.sequence>request.after); data={events,latest:events.at(-1)?.sequence || request.after}; }
+        else if(request.op==='prepare_microphone') {window.prepared=true;data=true;}
         else if(request.op==='send_audio_signal') window.sentSignals.push(request);
         setTimeout(()=>window.localResolve(id,JSON.stringify({ok:true,data})),1);
       }};
@@ -54,6 +58,8 @@ const server = http.createServer((req,res) => {
     await page.locator('#calls-nav').waitFor({state:'visible'});
     await page.getByRole('button',{name:'通話',exact:true}).last().click();
     await page.waitForFunction(()=>window.sentSignals.some(signal=>signal.kind==='offer'));
+    assert.equal(await page.evaluate(()=>window.microphoneCalls.length),2,'Audio capture should retry with basic constraints');
+    assert.equal(await page.evaluate(()=>window.microphoneCalls[1].audio),true);
     assert.equal(await page.locator('#call-state-text').textContent(),'呼び出しています…');
     const callId=await page.evaluate(()=>window.sentSignals.find(signal=>signal.kind==='offer').call_id);
     await page.evaluate(({callId})=>window.queueSignal('answer',{type:'answer',sdp:'remote-answer'},callId),{callId});
@@ -73,6 +79,6 @@ const server = http.createServer((req,res) => {
     assert.equal(await page.evaluate(()=>window.testPcs[1].remoteDescription.sdp),'incoming-offer');
     await page.getByRole('button',{name:'通話を終了',exact:true}).click();
     assert.deepEqual(errors,[]);
-    console.log('PASS calls: outgoing answer, mute/end, incoming accept, authenticated signaling UI');
+    console.log('PASS calls: Android permission preflight and capture fallback, outgoing answer, mute/end, incoming accept');
   } finally { await browser.close(); server.close(); }
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});
